@@ -99,8 +99,8 @@ func (c *Cache) Set(command, question, model string, response *llm.QueryResponse
 
 // saveEntry writes an entry to disk
 func (c *Cache) saveEntry(entry *Entry) error {
-	// Ensure cache directory exists
-	if err := os.MkdirAll(c.cacheDir, 0755); err != nil {
+	// Ensure cache directory exists (0700 for security)
+	if err := os.MkdirAll(c.cacheDir, 0700); err != nil {
 		return fmt.Errorf("failed to create cache directory: %w", err)
 	}
 
@@ -111,7 +111,8 @@ func (c *Cache) saveEntry(entry *Entry) error {
 		return fmt.Errorf("failed to marshal cache entry: %w", err)
 	}
 
-	if err := os.WriteFile(entryPath, data, 0644); err != nil {
+	// Write cache file with restricted permissions (0600 for security)
+	if err := os.WriteFile(entryPath, data, 0600); err != nil {
 		return fmt.Errorf("failed to write cache entry: %w", err)
 	}
 

@@ -68,9 +68,9 @@ func Load() (*Config, error) {
 func Save(cfg *Config) error {
 	configPath := getConfigPath()
 
-	// Ensure config directory exists
+	// Ensure config directory exists (0700 for security)
 	configDir := filepath.Dir(configPath)
-	if err := os.MkdirAll(configDir, 0755); err != nil {
+	if err := os.MkdirAll(configDir, 0700); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
@@ -80,8 +80,8 @@ func Save(cfg *Config) error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	// Write to file
-	if err := os.WriteFile(configPath, data, 0644); err != nil {
+	// Write to file (0600 for security - contains API keys via env)
+	if err := os.WriteFile(configPath, data, 0600); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 
