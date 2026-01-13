@@ -2,12 +2,28 @@ package cli
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/alecf/heyman/internal/cache"
 	"github.com/alecf/heyman/internal/config"
 	"github.com/spf13/cobra"
 )
+
+// validModelName checks if a model name is safe for use in profile names
+// Allows: alphanumeric, dots, colons, hyphens, underscores
+var validModelName = regexp.MustCompile(`^[a-zA-Z0-9._:-]+$`)
+
+// sanitizeProfileName creates a safe profile name from user input
+func sanitizeProfileName(input string) string {
+	// Only allow alphanumeric, hyphens, and underscores
+	safe := regexp.MustCompile(`[^a-zA-Z0-9_-]`).ReplaceAllString(input, "-")
+	// Remove leading/trailing hyphens
+	safe = strings.Trim(safe, "-")
+	// Collapse multiple hyphens
+	safe = regexp.MustCompile(`-+`).ReplaceAllString(safe, "-")
+	return safe
+}
 
 func setupCmd() *cobra.Command {
 	return &cobra.Command{
@@ -41,6 +57,11 @@ You can also set up profiles manually by editing:
 			var choice string
 			fmt.Scanln(&choice)
 
+			// Validate choice
+			if choice != "1" && choice != "2" && choice != "3" {
+				return fmt.Errorf("invalid choice: must be 1, 2, or 3")
+			}
+
 			var provider, model, profileName string
 
 			switch choice {
@@ -63,7 +84,12 @@ You can also set up profiles manually by editing:
 				if model == "" {
 					model = "llama3.2:latest"
 				}
-				profileName = fmt.Sprintf("ollama-%s", strings.Split(model, ":")[0])
+				// Validate model name
+				if !validModelName.MatchString(model) {
+					return fmt.Errorf("invalid model name: only alphanumeric, dots, colons, hyphens, and underscores allowed")
+				}
+				baseProfileName := strings.Split(model, ":")[0]
+				profileName = fmt.Sprintf("ollama-%s", sanitizeProfileName(baseProfileName))
 				fmt.Println("\nUsing Ollama with", model)
 				fmt.Println("Make sure Ollama is running: ollama serve")
 			default:

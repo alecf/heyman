@@ -11,7 +11,6 @@ import (
 // OpenAIProvider implements the Provider interface for OpenAI
 type OpenAIProvider struct {
 	client openai.Client
-	apiKey string
 }
 
 // NewOpenAIProvider creates a new OpenAI provider
@@ -26,7 +25,6 @@ func NewOpenAIProvider(apiKey string) (*OpenAIProvider, error) {
 
 	return &OpenAIProvider{
 		client: client,
-		apiKey: apiKey,
 	}, nil
 }
 
