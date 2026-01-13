@@ -60,6 +60,13 @@ func (c *Cache) Get(command, question, model string) (*llm.QueryResponse, bool) 
 		return nil, false
 	}
 
+	// Validate response is not nil (could be nil from corrupted cache)
+	if entry.Response == nil {
+		// Delete corrupted entry
+		os.Remove(entryPath)
+		return nil, false
+	}
+
 	// Update access metadata
 	entry.AccessedAt = time.Now()
 	entry.AccessCount++
