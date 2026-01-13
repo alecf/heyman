@@ -1,7 +1,9 @@
 package manpage
 
 import (
+	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -21,34 +23,54 @@ func NewFetcher() *Fetcher {
 // Supports both "man 3 printf" and "man -s 3 printf" syntax
 // Uses MANPAGER=cat and col -b to get clean text output
 func (f *Fetcher) Fetch(command string, section string) (string, error) {
-	var cmd *exec.Cmd
-
 	if section != "" {
 		// Try both section syntaxes for cross-platform compatibility
 		// First try: man <section> <command>
-		cmd = exec.Command("sh", "-c", fmt.Sprintf("MANPAGER=cat man %s %s | col -b", section, command))
-		output, err := cmd.Output()
+		output, err := f.fetchManPage([]string{section, command})
 		if err == nil {
-			return cleanManPage(string(output)), nil
+			return cleanManPage(output), nil
 		}
 
 		// Second try: man -s <section> <command>
-		cmd = exec.Command("sh", "-c", fmt.Sprintf("MANPAGER=cat man -s %s %s | col -b", section, command))
-		output, err = cmd.Output()
+		output, err = f.fetchManPage([]string{"-s", section, command})
 		if err != nil {
 			return "", fmt.Errorf("man page for %s(%s) not found", command, section)
 		}
-		return cleanManPage(string(output)), nil
+		return cleanManPage(output), nil
 	}
 
 	// No section specified, use default
-	cmd = exec.Command("sh", "-c", fmt.Sprintf("MANPAGER=cat man %s | col -b", command))
-	output, err := cmd.Output()
+	output, err := f.fetchManPage([]string{command})
 	if err != nil {
 		return "", fmt.Errorf("man page for %q not found. Try: man -k %s", command, command)
 	}
 
-	return cleanManPage(string(output)), nil
+	return cleanManPage(output), nil
+}
+
+// fetchManPage executes man command with given args and pipes through col -b
+// This avoids shell injection by using exec.Command with separate arguments
+func (f *Fetcher) fetchManPage(args []string) (string, error) {
+	// Run man command with MANPAGER=cat to get raw output
+	manCmd := exec.Command("man", args...)
+	manCmd.Env = append(os.Environ(), "MANPAGER=cat")
+
+	manOutput, err := manCmd.Output()
+	if err != nil {
+		return "", err
+	}
+
+	// Pipe output through col -b to remove backspaces and formatting
+	colCmd := exec.Command("col", "-b")
+	colCmd.Stdin = bytes.NewReader(manOutput)
+
+	colOutput, err := colCmd.Output()
+	if err != nil {
+		// If col fails, return the man output anyway
+		return string(manOutput), nil
+	}
+
+	return string(colOutput), nil
 }
 
 // ParseCommand parses the command and section from arguments
