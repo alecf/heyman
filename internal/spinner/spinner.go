@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 	"time"
 
 	"golang.org/x/term"
@@ -16,6 +17,7 @@ type Spinner struct {
 	frames  []string
 	done    chan bool
 	active  bool
+	mu      sync.RWMutex // Protects message and active fields
 }
 
 // New creates a new spinner
@@ -35,7 +37,10 @@ func (s *Spinner) Start() {
 		return
 	}
 
+	s.mu.Lock()
 	s.active = true
+	s.mu.Unlock()
+
 	go func() {
 		ticker := time.NewTicker(80 * time.Millisecond)
 		defer ticker.Stop()
@@ -46,7 +51,10 @@ func (s *Spinner) Start() {
 			case <-s.done:
 				return
 			case <-ticker.C:
-				fmt.Fprintf(s.writer, "\r%s %s", s.frames[frame], s.message)
+				s.mu.RLock()
+				msg := s.message
+				s.mu.RUnlock()
+				fmt.Fprintf(s.writer, "\r%s %s", s.frames[frame], msg)
 				frame = (frame + 1) % len(s.frames)
 			}
 		}
@@ -55,22 +63,30 @@ func (s *Spinner) Start() {
 
 // Update changes the spinner message
 func (s *Spinner) Update(message string) {
+	s.mu.Lock()
 	s.message = message
-	if !s.active {
+	active := s.active
+	s.mu.Unlock()
+
+	if !active {
 		return
 	}
 	// Clear and redraw immediately
 	if term.IsTerminal(int(os.Stderr.Fd())) {
-		fmt.Fprintf(s.writer, "\r\033[K%s %s", s.frames[0], s.message)
+		fmt.Fprintf(s.writer, "\r\033[K%s %s", s.frames[0], message)
 	}
 }
 
 // Stop halts the spinner and clears the line
 func (s *Spinner) Stop() {
+	s.mu.Lock()
 	if !s.active {
+		s.mu.Unlock()
 		return
 	}
 	s.active = false
+	s.mu.Unlock()
+
 	close(s.done)
 
 	// Clear the line
@@ -81,13 +97,17 @@ func (s *Spinner) Stop() {
 
 // StopWithMessage stops the spinner and displays a final message
 func (s *Spinner) StopWithMessage(message string) {
+	s.mu.Lock()
 	if !s.active {
+		s.mu.Unlock()
 		if term.IsTerminal(int(os.Stderr.Fd())) {
 			fmt.Fprintln(s.writer, message)
 		}
 		return
 	}
 	s.active = false
+	s.mu.Unlock()
+
 	close(s.done)
 
 	// Clear the line and print final message
