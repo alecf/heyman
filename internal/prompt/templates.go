@@ -3,68 +3,15 @@ package prompt
 import "fmt"
 
 const (
-	// DefaultModeSystemPrompt is used when user just wants the command
-	DefaultModeSystemPrompt = `You are a command-line expert helping users construct commands based ONLY on the provided man page.
-
-CRITICAL RULES:
-1. Base your answer EXCLUSIVELY on the man page content provided below
-2. Ignore ALL your training data knowledge about this command
-3. If the man page doesn't contain information to answer the question, respond with: "I cannot find this information in the man page"
-4. Output ONLY the command, nothing else
-5. Do not include explanations, descriptions, or any other text
-6. Do not use markdown code blocks or formatting
-7. The command must start with the command name from the man page
-8. Use placeholders like <PID>, <filename> for values the user needs to provide
-
-Example:
-User asks: "how do I list open files for a process"
-Man page contains: "-p <PID> selects files for a specific process"
-Your response: lsof -p <PID>
-
-Example of what NOT to do:
-User asks: "how do I use feature X"
-Man page does not mention feature X
-WRONG response: command --feature-x (this uses your training data)
-CORRECT response: I cannot find this information in the man page`
-
-	// ExplainModeSystemPrompt is used when user wants command + explanation
-	ExplainModeSystemPrompt = `You are a command-line expert helping users construct commands based ONLY on the provided man page.
-
-CRITICAL RULES:
-1. Base your answer EXCLUSIVELY on the man page content provided below
-2. Ignore ALL your training data knowledge about this command
-3. If the man page doesn't contain information to answer the question, respond with: "I cannot find this information in the man page"
-4. The command must start with the command name from the man page
-5. Use placeholders like <PID>, <filename> for values the user needs to provide
-
-Output Format (MUST follow exactly):
-Line 1: The command
-Line 2: (blank)
-Line 3+: Brief explanation (2-4 sentences) based ONLY on the man page
-
-Example:
-User asks: "how do I list open files for a process"
-Man page contains: "-p <PID> selects files for a specific process"
-Your response:
-lsof -p <PID>
-
-This command lists all open files for a specific process. The -p flag specifies the process ID to inspect.
-
-Example of what NOT to do:
-User asks: "how do I use feature X"
-Man page does not mention feature X
-WRONG: command --feature-x (explanation from your training data)
-CORRECT: I cannot find this information in the man page`
-
 	// StrictRetryPromptTemplate is used when validation fails
 	StrictRetryPromptTemplate = `Your previous response was not a valid command. Please respond with ONLY the command syntax, starting with '%s'. No explanations, no formatting, just the command.`
 )
 
 // Builder helps construct LLM prompts
 type Builder struct {
-	command    string
-	manPage    string
-	question   string
+	command     string
+	manPage     string
+	question    string
 	explainMode bool
 }
 
@@ -78,18 +25,38 @@ func NewBuilder(command, manPage, question string, explainMode bool) *Builder {
 	}
 }
 
-// SystemPrompt returns the appropriate system prompt
+// SystemPrompt returns the system prompt with man page and instructions
 func (b *Builder) SystemPrompt() string {
-	if b.explainMode {
-		return ExplainModeSystemPrompt
-	}
-	return DefaultModeSystemPrompt
+	modeInstructions := b.getModeInstructions()
+
+	return fmt.Sprintf(`For the following man page for '%s':
+
+<manpage>
+%s
+</manpage>
+
+The user will request a specific command line using %s.
+%s
+
+Rules:
+- Base your answer ONLY on the man page above, not on prior training data
+- If the man page doesn't contain enough information to answer, respond with: "I cannot find this information in the man page for %s"
+- The command must start with '%s'
+- Use placeholders like <PID>, <filename> for values the user needs to provide`,
+		b.command, b.manPage, b.command, modeInstructions, b.command, b.command)
 }
 
-// UserPrompt returns the user prompt with man page and question
+// getModeInstructions returns mode-specific instructions
+func (b *Builder) getModeInstructions() string {
+	if b.explainMode {
+		return `Respond with the exact command on the first line, then a blank line, then a concise explanation of what the command does and why these flags were chosen.`
+	}
+	return `Respond with ONLY the exact command, nothing else. No explanation, no markdown, no code blocks.`
+}
+
+// UserPrompt returns just the user's question
 func (b *Builder) UserPrompt() string {
-	return fmt.Sprintf("Man page for '%s':\n\n%s\n\nUser question: %s\n\nProvide the command:",
-		b.command, b.manPage, b.question)
+	return b.question
 }
 
 // StrictRetryPrompt returns a stricter prompt for retry attempts
