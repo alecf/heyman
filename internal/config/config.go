@@ -119,6 +119,61 @@ func (c *Config) AddProfile(name string, profile Profile) {
 	c.Profiles[name] = profile
 }
 
+// DeleteProfile removes a profile and handles default reassignment
+// Returns the new default profile name if changed, empty string if unchanged
+func (c *Config) DeleteProfile(name string) (newDefault string, err error) {
+	if _, ok := c.Profiles[name]; !ok {
+		return "", fmt.Errorf("profile %q not found", name)
+	}
+
+	delete(c.Profiles, name)
+
+	// Handle default reassignment if we deleted the default
+	if c.DefaultProfile == name {
+		if len(c.Profiles) == 0 {
+			c.DefaultProfile = ""
+			return "", nil
+		}
+		// Pick first alphabetically for predictability
+		c.DefaultProfile = c.SortedProfileNames()[0]
+		return c.DefaultProfile, nil
+	}
+
+	return "", nil
+}
+
+// SetDefault sets the default profile
+func (c *Config) SetDefault(name string) error {
+	if _, ok := c.Profiles[name]; !ok {
+		return fmt.Errorf("profile %q not found", name)
+	}
+	c.DefaultProfile = name
+	return nil
+}
+
+// ProfileExists checks if a profile name already exists
+func (c *Config) ProfileExists(name string) bool {
+	_, ok := c.Profiles[name]
+	return ok
+}
+
+// SortedProfileNames returns profile names in alphabetical order
+func (c *Config) SortedProfileNames() []string {
+	names := make([]string, 0, len(c.Profiles))
+	for name := range c.Profiles {
+		names = append(names, name)
+	}
+	// Sort alphabetically
+	for i := 0; i < len(names)-1; i++ {
+		for j := i + 1; j < len(names); j++ {
+			if names[i] > names[j] {
+				names[i], names[j] = names[j], names[i]
+			}
+		}
+	}
+	return names
+}
+
 // GetContextWindow returns the context window for a profile, defaulting to 8192
 func (p *Profile) GetContextWindow() int {
 	if p.ContextWindow > 0 {
