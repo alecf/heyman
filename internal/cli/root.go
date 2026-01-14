@@ -57,9 +57,7 @@ Example:
 	rootCmd.Flags().BoolP("copy", "c", false, "copy command to clipboard")
 
 	// Management commands
-	rootCmd.AddCommand(setupCmd())
-	rootCmd.AddCommand(setProfileCmd())
-	rootCmd.AddCommand(listProfilesCmd())
+	rootCmd.AddCommand(profileCmd())
 	rootCmd.AddCommand(testConfigCmd())
 	rootCmd.AddCommand(cacheStatsCmd())
 	rootCmd.AddCommand(clearCacheCmd())
@@ -98,7 +96,7 @@ func run(cmd *cobra.Command, args []string) error {
 	// Get active profile
 	activeProfile, err := cfg.GetActiveProfile()
 	if err != nil {
-		return fmt.Errorf("no profile configured: %w\nRun 'heyman setup' to configure", err)
+		return fmt.Errorf("no profile configured: %w\nRun 'heyman profile setup' to configure", err)
 	}
 
 	if verbose {
