@@ -1,0 +1,39 @@
+version: 1
+cases:
+  - id: lsof-port
+    command: lsof
+    question: which process is listening on port 8080
+    tags: [network, easy]
+    reference: ["lsof -nP -iTCP:8080 -sTCP:LISTEN"]
+    checks:
+      - program: lsof
+      - regex: ':8080\b'
+  - id: ps-mem
+    question: top 10 processes by memory
+    tags: [processes, medium, bsd-gnu, multi-tool]
+    reference: ["ps aux -m | head -n 11"]
+    checks:
+      - program: ps
+      - any:
+          - program: head
+          - regex: 'NR\s*<=?\s*1[01]'
+    forbid: ['\brm\b']
+    platforms:
+      darwin:
+        - any:
+            - regex: '\bps\s+(\S+\s+)*-[a-zA-Z]*m(\s|$)'
+            - regex: '\|\s*sort\b'
+      linux:
+        - regex: '--sort'
+  - id: count-lines
+    question: count lines in all .txt files
+    tags: [files, hard]
+    reference: ["cat *.txt | wc -l"]
+    checks:
+      - program: wc
+    exec:
+      setup: |
+        printf 'a\nb\n' > a.txt
+        printf 'c\n' > b.txt
+      compare: stdout
+      timeout_seconds: 5

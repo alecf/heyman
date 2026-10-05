@@ -19,10 +19,13 @@
 #               needs-jq    requires jq; runner should SKIP (or mark n/a) if jq is absent
 #   reference 1+ known-good answers (for humans and an LLM judge). All references are
 #             valid on macOS. Where the GNU/Linux form differs, it is given in a YAML
-#             comment next to the case. reference[0] of an exec case is portable
+#             comment next to the case and in references_by_os. reference[0] of an exec case is portable
 #             (runs on macOS and Linux), sometimes via `gnu-form 2>/dev/null || bsd-form`
 #             (GNU-first on purpose: e.g. GNU `stat -f` means --file-system and succeeds,
 #             so a BSD-first fallback would never trigger on Linux).
+#   references_by_os  optional map GOOS -> references; when present for the runner's
+#             OS it replaces `reference` in the judge prompt (exec always runs
+#             reference[0]). `--self-test` grades each entry as that OS.
 #   checks    deterministic grading; ALL must pass
 #   forbid    optional list of RE2 regexes; the candidate FAILS if ANY matches
 #   platforms optional map GOOS -> extra checks (same syntax as `checks`), ANDed with
@@ -122,20 +125,26 @@ cases:
     question: show the 10 processes using the most memory
     tags: [processes, ps, medium, bsd-gnu, multi-tool]
     # linux: ps aux --sort=-%mem | head -n 11
+    references_by_os:
+      linux:
+        - 'ps aux --sort=-%mem | head -n 11'
     reference:
       - ps aux -m | head -n 11
       - ps aux | sort -nrk 4 | head -n 10
       - ps -eo pid,rss,comm | sort -k2 -nr | head -n 10
+      - ps -Av | head -n 11
     checks:
       - program: ps
       - any:
           - program: head
           - regex: 'NR\s*<=?\s*1[01]'
-      - regex: '(?i)(%mem|rss|pmem|vsz|\s-m(\s|$)|-[a-z]*k\s*[''"]?(4|6)\b)'
+      - any:
+          - regex: '(?i)(%mem|rss|pmem|vsz|\s-m(\s|$)|-[a-z]*k\s*[''"]?(4|6)\b)'
+          - regex: '\bps\s+(\S+\s+)*-[a-zA-Z]*v'   # BSD ps -v implies -m (sort by memory)
     platforms:
-      darwin:   # BSD ps has no --sort; use -m or an external sort
+      darwin:   # BSD ps has no --sort; use -m (or -v, which implies -m) or an external sort
         - any:
-            - regex: '\bps\s+(\S+\s+)*-[a-zA-Z]*m(\s|$)'
+            - regex: '\bps\s+(\S+\s+)*-[a-zA-Z]*[mv](\s|$)'
             - regex: '\|\s*sort\b'
       linux:    # on Linux `ps -m` shows threads, it does not sort by memory
         - any:
@@ -147,6 +156,9 @@ cases:
     question: print a single non-interactive snapshot of the top processes sorted by CPU usage
     tags: [processes, top, medium, bsd-gnu]
     # linux: top -b -n 1 -o %CPU
+    references_by_os:
+      linux:
+        - 'top -b -n 1 -o %CPU'
     reference:
       - top -l 1 -o cpu
       - top -l 1 -o cpu -n 20
@@ -154,7 +166,7 @@ cases:
       - program: top
     platforms:
       darwin:
-        - regex: '-[a-zA-Z]*l\s*1\b'
+        - regex: '-[a-zA-Z]*l\s*[12]\b'   # -l 2 (keep the 2nd sample, which has real CPU deltas) is also fine
         - regex: '-o\s*[''"]?cpu'
       linux:
         - any:
@@ -251,6 +263,9 @@ cases:
     question: for every regular file under the current directory, print its size in bytes followed by its path, one file per line
     tags: [files, find, stat, hard, bsd-gnu]
     # linux: find . -type f -printf '%s %p\n'
+    references_by_os:
+      linux:
+        - 'find . -type f -printf ''%s %p\n'''
     reference:
       - find . -type f -exec wc -c {} \;
       - find . -type f -exec stat -f '%z %N' {} +
@@ -318,6 +333,8 @@ cases:
       - any:   # whitespace-safe plumbing
           - regex: '-print0'
           - regex: '-exec(dir)?\s'
+          - regex: '\s-ls\b'      # find -ls: size is column 7, before the (space-containing) name
+          - regex: '-printf'
           - regex: 'while\s+(IFS=\S*\s+)?read'
           - regex: '\bxargs\s+(\S+\s+)*-d\s*[''"]?\\n'
       - any:
@@ -341,6 +358,9 @@ cases:
     question: print the total number of lines, as a single number, across all the files listed in filelist.txt (one path per line; some paths contain spaces)
     tags: [files, xargs, wc, hard, bsd-gnu, multi-tool]
     # linux: xargs -d '\n' cat < filelist.txt | wc -l
+    references_by_os:
+      linux:
+        - 'xargs -d ''\n'' cat < filelist.txt | wc -l'
     reference:
       - |-
         tr '\n' '\0' < filelist.txt | xargs -0 cat | wc -l
@@ -452,6 +472,9 @@ cases:
     question: replace every occurrence of foo with bar in config.txt, editing the file in place
     tags: [text, sed, medium, bsd-gnu]
     # linux: sed -i 's/foo/bar/g' config.txt
+    references_by_os:
+      linux:
+        - 'sed -i ''s/foo/bar/g'' config.txt'
     reference:
       - sed -i '' 's/foo/bar/g' config.txt
       - sed -i.bak 's/foo/bar/g' config.txt
@@ -484,6 +507,9 @@ cases:
     question: replace oldName with newName in every .js file under src/, editing the files in place
     tags: [text, sed, find, xargs, hard, bsd-gnu, multi-tool]
     # linux: find src -name '*.js' -exec sed -i 's/oldName/newName/g' {} +
+    references_by_os:
+      linux:
+        - 'find src -name ''*.js'' -exec sed -i ''s/oldName/newName/g'' {} +'
     reference:
       - find src -type f -name '*.js' -exec sed -i '' 's/oldName/newName/g' {} +
       - grep -rl --include='*.js' oldName src | xargs sed -i '' 's/oldName/newName/g'
@@ -639,6 +665,9 @@ cases:
     question: print only the size in bytes of notes.txt
     tags: [files, stat, medium, bsd-gnu]
     # linux: stat -c%s notes.txt
+    references_by_os:
+      linux:
+        - 'stat -c%s notes.txt'
     reference:
       - stat -c%s notes.txt 2>/dev/null || stat -f%z notes.txt
       - stat -f %z notes.txt
@@ -669,6 +698,10 @@ cases:
     question: print the last-modified time of notes.txt as a unix timestamp (seconds since the epoch)
     tags: [files, stat, dates, medium, bsd-gnu]
     # linux: stat -c %Y notes.txt   or   date -r notes.txt +%s
+    references_by_os:
+      linux:
+        - 'stat -c %Y notes.txt'
+        - 'date -r notes.txt +%s'
     reference:
       - date -r notes.txt +%s
       - stat -f %m notes.txt
@@ -703,6 +736,9 @@ cases:
     question: print yesterday's date as YYYY-MM-DD
     tags: [dates, date, medium, bsd-gnu]
     # linux: date -d yesterday +%F
+    references_by_os:
+      linux:
+        - 'date -d yesterday +%F'
     reference:
       - date -v-1d +%Y-%m-%d 2>/dev/null || date -d yesterday +%Y-%m-%d
       - date -v-1d +%F
@@ -727,6 +763,9 @@ cases:
     question: convert the unix timestamp 1700000000 to a UTC date formatted as YYYY-MM-DD HH:MM:SS
     tags: [dates, date, medium, bsd-gnu]
     # linux: date -u -d @1700000000 '+%Y-%m-%d %H:%M:%S'
+    references_by_os:
+      linux:
+        - 'date -u -d @1700000000 ''+%Y-%m-%d %H:%M:%S'''
     reference:
       - |-
         date -u -r 1700000000 '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date -u -d @1700000000 '+%Y-%m-%d %H:%M:%S'
@@ -763,6 +802,9 @@ cases:
     question: print only the MD5 hash of release.zip (just the hex digest, nothing else)
     tags: [files, hashing, easy]
     # linux: md5sum release.zip | cut -d' ' -f1
+    references_by_os:
+      linux:
+        - 'md5sum release.zip | cut -d'' '' -f1'
     reference:
       - md5 -q release.zip 2>/dev/null || md5sum release.zip | cut -d' ' -f1
       - md5 -q release.zip
@@ -809,6 +851,13 @@ cases:
       - any:
           - program: head
           - regex: 'NR\s*<=?\s*[56]'
+      - any:   # `du -d 1` also prints "." (the grand total, always largest): take 6 lines or drop it
+          - regex: '\bdu\s+(\S+\s+)*\S*\*'
+          - regex: '\bhead\s+(-n\s*)?-?6\b'
+          - regex: 'NR\s*(<=?\s*6|>\s*1|!=\s*1)'
+          - regex: '\btail\s+(-n\s*)?\+2\b'
+          - regex: '\bgrep\s+(\S+\s+)*-[a-zA-Z]*v'
+          - regex: '-mindepth\s+1'
     platforms:
       darwin:   # BSD du has -d, not --max-depth
         - any:

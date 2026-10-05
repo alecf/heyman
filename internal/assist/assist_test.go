@@ -535,3 +535,25 @@ func TestPromptPreview(t *testing.T) {
 		t.Errorf("preview: user=%q", user)
 	}
 }
+
+func TestParseTextRejectsJunkFromEvals(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{`man[ARGS]{"page": "stat"}`, ""},
+		{`stat({"page": "stat"})`, ""},
+		{`{"command": "ls"}`, ""},
+		{"**find . -name '*.go'**", "find . -name '*.go'"},
+		{"__ls -la__", "ls -la"},
+	} {
+		if got, _ := ParseText(tc.in); got != tc.want {
+			t.Errorf("ParseText(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestAskDoesNotMutateAssistant(t *testing.T) {
+	a := &Assistant{}
+	_ = a.withDefaults()
+	if a.MaxSteps != 0 || a.PageChars != 0 || a.Man != nil {
+		t.Fatalf("withDefaults mutated the receiver: %+v", a)
+	}
+}

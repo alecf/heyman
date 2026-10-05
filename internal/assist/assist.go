@@ -118,6 +118,25 @@ func (a *Assistant) emit(e Event) {
 	a.OnEvent(e)
 }
 
+// withDefaults returns a copy of a with zero fields filled in, so concurrent
+// Ask calls on one Assistant never write to shared state. Each copy has its
+// own event mutex; events only need ordering within one Ask.
+func (a *Assistant) withDefaults() *Assistant {
+	c := &Assistant{
+		Model:           a.Model,
+		ModelName:       a.ModelName,
+		Man:             a.Man,
+		MaxSteps:        a.MaxSteps,
+		PreloadChars:    a.PreloadChars,
+		PageChars:       a.PageChars,
+		MaxOutputTokens: a.MaxOutputTokens,
+		NoTools:         a.NoTools,
+		OnEvent:         a.OnEvent,
+	}
+	c.defaults()
+	return c
+}
+
 func (a *Assistant) defaults() {
 	if a.Man == nil {
 		a.Man = manpage.NewFetcher()
@@ -139,7 +158,7 @@ func (a *Assistant) defaults() {
 // Ask runs the tool loop and returns the command. On ErrNoCommand the
 // partial Result (usage, tool calls) is returned too.
 func (a *Assistant) Ask(ctx context.Context, req Request) (*Result, error) {
-	a.defaults()
+	a = a.withDefaults()
 	if strings.TrimSpace(req.Question) == "" {
 		return nil, fmt.Errorf("no question specified")
 	}
@@ -611,7 +630,11 @@ func ParseText(text string) (command, explanation string) {
 		if looksLikeProse(line) {
 			return "", ""
 		}
-		return cleanCommand(line), strings.TrimSpace(strings.Join(lines[i+1:], "\n"))
+		cmd := cleanCommand(line)
+		if toolCallText.MatchString(cmd) {
+			return "", ""
+		}
+		return cmd, strings.TrimSpace(strings.Join(lines[i+1:], "\n"))
 	}
 	return "", ""
 }
@@ -667,8 +690,19 @@ func cleanCommand(s string) string {
 		s = strings.TrimSpace(s[1 : len(s)-1])
 	}
 	s = strings.TrimPrefix(s, "$ ")
+	// Markdown bold/italic around the whole command: **cmd** or __cmd__.
+	for _, m := range []string{"**", "__"} {
+		if len(s) > 2*len(m) && strings.HasPrefix(s, m) && strings.HasSuffix(s, m) {
+			s = strings.TrimSpace(s[len(m) : len(s)-len(m)])
+		}
+	}
 	return strings.TrimSpace(s)
 }
+
+// toolCallText matches a tool call written out as text by models that don't
+// emit real tool calls, e.g. `man[ARGS]{"page": "stat"}`, `man({"page":…})`
+// or a bare JSON object.
+var toolCallText = regexp.MustCompile(`^(\w+\s*(\[ARGS\]|\()\s*\{|\{\s*")`)
 
 // Chunk returns page[offset:offset+limit] cut at a line boundary, with a
 // header telling the model how to continue.
