@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os/exec"
 	"runtime"
+	"strings"
 )
 
 // CopyToClipboard copies text to the system clipboard
@@ -19,8 +20,10 @@ func CopyToClipboard(text string) error {
 			cmd = exec.Command("wl-copy")
 		} else if _, err := exec.LookPath("xclip"); err == nil {
 			cmd = exec.Command("xclip", "-selection", "clipboard")
+		} else if _, err := exec.LookPath("xsel"); err == nil {
+			cmd = exec.Command("xsel", "--clipboard", "--input")
 		} else {
-			return fmt.Errorf("no clipboard utility found (install wl-copy or xclip)")
+			return fmt.Errorf("no clipboard utility found (install wl-copy, xclip or xsel)")
 		}
 	case "windows":
 		cmd = exec.Command("clip")
@@ -28,26 +31,11 @@ func CopyToClipboard(text string) error {
 		return fmt.Errorf("clipboard not supported on %s", runtime.GOOS)
 	}
 
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return fmt.Errorf("failed to open stdin pipe: %w", err)
+	cmd.Stdin = strings.NewReader(text)
+	// Don't capture output: wl-copy and xclip fork a child that keeps
+	// serving the selection, and capturing their stdout would wait on it.
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s failed: %w", cmd.Path, err)
 	}
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start clipboard command: %w", err)
-	}
-
-	if _, err := stdin.Write([]byte(text)); err != nil {
-		return fmt.Errorf("failed to write to clipboard: %w", err)
-	}
-
-	if err := stdin.Close(); err != nil {
-		return fmt.Errorf("failed to close stdin: %w", err)
-	}
-
-	if err := cmd.Wait(); err != nil {
-		return fmt.Errorf("clipboard command failed: %w", err)
-	}
-
 	return nil
 }

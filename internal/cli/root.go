@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"runtime"
 	"strings"
 
@@ -21,6 +22,7 @@ import (
 
 type rootFlags struct {
 	model   string
+	section string
 	profile string
 	noCache bool
 	verbose bool
@@ -33,7 +35,14 @@ type rootFlags struct {
 	copy    bool
 }
 
+// Execute runs the heyman CLI.
 func Execute(version, commit, date string) error {
+	return newRootCmd(version, commit, date, run).Execute()
+}
+
+// newRootCmd builds the command tree; runFn handles the root command (tests
+// substitute it to inspect argument parsing).
+func newRootCmd(version, commit, date string, runFn func(*cobra.Command, *rootFlags, []string) error) *cobra.Command {
 	var f rootFlags
 
 	rootCmd := &cobra.Command{
@@ -49,11 +58,11 @@ Name the program you have in mind, or use -- and let heyman pick:
 Choose a model with --model provider/model (default ` + llm.DefaultModel + `):
   providers: ` + strings.Join(llm.Providers(), ", "),
 		Version:       fmt.Sprintf("%s (commit: %s, built: %s)", version, commit, date),
-		Args:          cobra.MinimumNArgs(1),
+		Args:          cobra.ArbitraryArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return run(cmd, &f, args)
+			return runFn(cmd, &f, args)
 		},
 	}
 
@@ -63,10 +72,11 @@ Choose a model with --model provider/model (default ` + llm.DefaultModel + `):
 	pf.BoolVar(&f.noCache, "no-cache", false, "bypass cache for this query")
 	pf.BoolVarP(&f.verbose, "verbose", "v", false, "show model, man pages consulted and tool calls on stderr")
 	pf.BoolVarP(&f.quiet, "quiet", "q", false, "suppress progress messages")
-	pf.BoolVarP(&f.debug, "debug", "d", false, "show the full prompt and tool trace on stderr")
-	pf.BoolVar(&f.dryRun, "dry-run", false, "print the prompt without calling a model")
+	pf.BoolVarP(&f.debug, "debug", "d", false, "also print the system prompt and full tool trace on stderr")
+	pf.BoolVar(&f.dryRun, "dry-run", false, "print the prompt (as sent to a tool-calling model) without calling a model")
 
 	fl := rootCmd.Flags()
+	fl.StringVarP(&f.section, "section", "s", "", "man page section of <command>, e.g. 3 for `heyman -s 3 printf …`")
 	fl.BoolVarP(&f.explain, "explain", "e", false, "include an explanation")
 	fl.BoolVarP(&f.json, "json", "j", false, "JSON output with metadata")
 	fl.BoolVarP(&f.tokens, "tokens", "t", false, "show token usage and costs")
@@ -81,65 +91,98 @@ Choose a model with --model provider/model (default ` + llm.DefaultModel + `):
 	rootCmd.AddCommand(cacheStatsCmd())
 	rootCmd.AddCommand(clearCacheCmd())
 
-	return rootCmd.Execute()
+	return rootCmd
 }
 
-// parseRequest splits argv into a Request. Forms:
+// parseRequest splits argv into a Request. dash is cobra's ArgsLenAtDash
+// and section the --section flag. Forms:
 //
 //	heyman <command> <words…>          command named, its man page preloaded
 //	heyman <section> <command> <words…>
+//	heyman -s <section> <command> <words…>
+//	heyman <command> -- <words…>        words may start with dashes
 //	heyman -- <words…>                  no command; the model chooses
 //	heyman "<a whole request>"          a single quoted argument also means no command
-func parseRequest(args []string, dash int) (assist.Request, error) {
+func parseRequest(args []string, dash int, section string) (assist.Request, error) {
 	var req assist.Request
-	if dash == 0 || (dash < 0 && len(args) == 1 && strings.ContainsAny(args[0], " \t")) {
+	if len(args) == 0 {
+		return req, errNoRequest
+	}
+	if dash == 0 || (dash < 0 && len(args) == 1 && strings.ContainsAny(strings.TrimSpace(args[0]), " \t")) {
 		req.Question = strings.TrimSpace(strings.Join(args, " "))
 		if req.Question == "" {
-			return req, fmt.Errorf("no request given")
+			return req, errNoRequest
 		}
 		return req, nil
 	}
-	if dash > 0 {
-		// `heyman git -- --since what` : everything after -- belongs to the question.
-		before, after := args[:dash], args[dash:]
-		cmd, section, q := manpage.ParseCommand(before)
-		req.Command, req.Section = cmd, section
-		req.Question = strings.Join(append(q, after...), " ")
+	if dash < 0 {
+		// Root flags stop at the first positional argument, so a `--` after
+		// the command reaches us as a literal argument: `heyman git -- --since
+		// what` or `heyman 3 printf -- …`. Treat it as the separator.
+		i := 1
+		if isSectionArg(args[0]) {
+			i = 2
+		}
+		if i < len(args) && args[i] == "--" {
+			args = append(append([]string(nil), args[:i]...), args[i+1:]...)
+		}
 	} else {
-		cmd, section, q := manpage.ParseCommand(args)
-		req.Command, req.Section = cmd, section
-		req.Question = strings.Join(q, " ")
+		args = append([]string(nil), args...) // `--` already removed by cobra
 	}
+	cmd, sec, q := manpage.ParseCommand(args)
+	req.Command, req.Section = cmd, sec
+	if section != "" {
+		req.Section = section
+	}
+	req.Question = strings.TrimSpace(strings.Join(q, " "))
 	if req.Command == "" {
-		return req, fmt.Errorf("no command specified")
+		return req, errNoRequest
 	}
-	if strings.TrimSpace(req.Question) == "" {
-		return req, fmt.Errorf("no request given for %q. Usage: heyman %s <what you want to do>", req.Command, req.Command)
+	if req.Question == "" {
+		return req, fmt.Errorf("no request given for %q. Usage: heyman %s <what you want to do>  (or: heyman -- %s)", req.Command, req.Command, req.Command)
 	}
 	return req, nil
 }
 
-// resolveModel picks the model: --model, HEYMAN_MODEL, --profile/HEYMAN_PROFILE,
-// the config's default profile, then llm.DefaultModel.
+var errNoRequest = errors.New("no request given. Usage: heyman <command> <what you want to do>, or heyman -- <what you want to do>")
+
+func isSectionArg(s string) bool {
+	return len(s) == 1 && s[0] >= '1' && s[0] <= '9'
+}
+
+// resolveModel picks the model, most explicit first: --model, --profile,
+// HEYMAN_MODEL, HEYMAN_PROFILE, the config's default_profile, then
+// llm.DefaultModel. source says which one won (for -v and errors).
 func resolveModel(f *rootFlags, cfg *config.Config) (model, baseURL, source string, err error) {
 	if f.model != "" {
 		return f.model, "", "--model", nil
 	}
-	if m := os.Getenv("HEYMAN_MODEL"); m != "" {
-		return m, "", "HEYMAN_MODEL", nil
-	}
-	name := f.profile
+	name, from := f.profile, "--profile"
 	if name == "" {
-		name = cfg.DefaultProfile // includes HEYMAN_PROFILE, applied by config.Load
-	}
-	if name != "" {
-		p, ok := cfg.Profiles[name]
-		if !ok {
-			return "", "", "", fmt.Errorf("profile %q not found (available: %s)", name, strings.Join(cfg.SortedProfileNames(), ", "))
+		if m := os.Getenv("HEYMAN_MODEL"); m != "" {
+			return m, "", "HEYMAN_MODEL", nil
 		}
-		return p.Spec(), p.BaseURL, "profile " + name, nil
+		name, from = cfg.ActiveProfile()
 	}
-	return llm.DefaultModel, "", "default", nil
+	if name == "" {
+		return llm.DefaultModel, "", "default", nil
+	}
+	p, ok := cfg.Profiles[name]
+	if !ok {
+		avail := "none; run: heyman profile setup"
+		if names := cfg.SortedProfileNames(); len(names) > 0 {
+			avail = strings.Join(names, ", ")
+		}
+		if from == "--profile" || from == "HEYMAN_PROFILE" {
+			return "", "", "", fmt.Errorf("profile %q (from %s) not found (available: %s)", name, from, avail)
+		}
+		// Don't silently fall back to a paid default model: say how to fix it.
+		return "", "", "", fmt.Errorf("profile %q (from %s) not found (available: %s).\nFix it with: heyman profile set-default <name>, or choose one per run with --profile or --model", name, from, avail)
+	}
+	if err := p.Validate(); err != nil {
+		return "", "", "", fmt.Errorf("%w (in %s)", err, config.Path())
+	}
+	return p.Spec(), p.BaseURL, "profile " + name, nil
 }
 
 func run(cmd *cobra.Command, f *rootFlags, args []string) error {
@@ -147,17 +190,24 @@ func run(cmd *cobra.Command, f *rootFlags, args []string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	// Ctrl-C cancels the model call (and the claude subprocess) cleanly so
+	// the spinner line gets cleared.
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
+	defer stop()
+
+	req, err := parseRequest(args, cmd.ArgsLenAtDash(), f.section)
+	if err != nil {
+		if errors.Is(err, errNoRequest) && len(args) == 0 {
+			_ = cmd.Usage()
+		}
+		return err
+	}
+	req.Explain = f.explain
 
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
-
-	req, err := parseRequest(args, cmd.ArgsLenAtDash())
-	if err != nil {
-		return err
-	}
-	req.Explain = f.explain
 
 	model, baseURL, source, err := resolveModel(f, cfg)
 	if err != nil {
@@ -174,6 +224,9 @@ func run(cmd *cobra.Command, f *rootFlags, args []string) error {
 		}
 	}
 	logf("Model: %s (%s)", spec, source)
+	if baseURL != "" {
+		logf("Base URL: %s", baseURL)
+	}
 	if req.Command != "" {
 		logf("Command: %s", pageKeyFor(req))
 	}
@@ -181,20 +234,23 @@ func run(cmd *cobra.Command, f *rootFlags, args []string) error {
 
 	man := manpage.NewFetcher()
 
-	if f.dryRun {
+	if f.dryRun || f.debug {
 		system, user, err := assist.PromptPreview(man, req)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("=== System prompt ===\n%s\n\n=== User prompt ===\n%s\n", system, user)
-		return nil
+		if f.dryRun {
+			fmt.Printf("=== System prompt ===\n%s\n\n=== User prompt ===\n%s\n", system, user)
+			return nil
+		}
+		fmt.Fprintf(os.Stderr, "=== System prompt ===\n%s\n=== User prompt ===\n%s\n=====================\n", system, user)
 	}
 
 	mode := "command"
 	if req.Explain {
 		mode = "explain"
 	}
-	key := cache.GenerateKey(spec.String(), mode, req.Command, req.Section, req.Question, runtime.GOOS)
+	key := cache.GenerateKey(spec.String(), baseURL, mode, req.Command, req.Section, req.Question, runtime.GOOS)
 	cacheManager := cache.New(cfg.CacheDays)
 
 	var res assist.Result
@@ -207,10 +263,19 @@ func run(cmd *cobra.Command, f *rootFlags, args []string) error {
 			spin = spinner.New(fmt.Sprintf("Asking %s…", spec))
 			spin.Start()
 		}
+		stopSpin := func() {
+			if spin != nil {
+				spin.Stop()
+			}
+		}
 		onEvent := func(e assist.Event) {
 			switch {
 			case f.verbose || f.debug:
-				fmt.Fprintf(os.Stderr, "  → %s %s\n", e.Tool, e.Detail)
+				if e.Kind == "note" {
+					fmt.Fprintf(os.Stderr, "  note: %s\n", e.Detail)
+				} else {
+					fmt.Fprintf(os.Stderr, "  → %s %s\n", e.Tool, e.Detail)
+				}
 			case spin != nil && e.Tool == "man":
 				spin.Update(fmt.Sprintf("Reading man %s…", e.Detail))
 			case spin != nil && e.Tool == "man_search":
@@ -219,19 +284,18 @@ func run(cmd *cobra.Command, f *rootFlags, args []string) error {
 		}
 		answerer, _, err := assist.New(ctx, assist.Config{Model: spec.String(), BaseURL: baseURL, Man: man, OnEvent: onEvent})
 		if err != nil {
-			if spin != nil {
-				spin.Stop()
-			}
+			stopSpin()
 			return err
 		}
 		out, err := answerer.Ask(ctx, req)
-		if spin != nil {
-			spin.Stop()
-		}
+		stopSpin()
 		if f.debug && out != nil {
 			for _, tc := range out.ToolCalls {
 				fmt.Fprintf(os.Stderr, "  tool %s %s %s\n", tc.Tool, tc.Input, tc.Error)
 			}
+		}
+		if ctx.Err() != nil {
+			return fmt.Errorf("interrupted")
 		}
 		if errors.Is(err, assist.ErrNoCommand) {
 			return fmt.Errorf("%s did not produce a command; try rephrasing, or a different --model", spec)
@@ -268,6 +332,11 @@ func outputResult(f *rootFlags, spec llm.Spec, res *assist.Result, explain bool)
 		c := mp.CalculateCost(res.Usage.InputTokens, res.Usage.OutputTokens)
 		cost = &c
 	}
+	if res.Cached {
+		// Nothing was spent on this run.
+		zero := 0.0
+		cost = &zero
+	}
 
 	if f.json {
 		jsonOutput, err := output.FormatJSON(res, explain, cost)
@@ -283,7 +352,11 @@ func outputResult(f *rootFlags, spec llm.Spec, res *assist.Result, explain bool)
 		}
 		if f.tokens {
 			fmt.Fprintln(os.Stderr)
-			fmt.Fprintln(os.Stderr, pricing.FormatTokenUsage(res.Usage.InputTokens, res.Usage.OutputTokens, cost, pricing.IsFree(spec.Provider), mp, db.LastUpdated))
+			if res.Cached {
+				fmt.Fprintln(os.Stderr, "Token usage: none (served from cache; use --no-cache to ask again)")
+			} else {
+				fmt.Fprintln(os.Stderr, pricing.FormatTokenUsage(res.Usage.InputTokens, res.Usage.OutputTokens, cost, pricing.IsFree(spec.Provider), mp, db.LastUpdated))
+			}
 		}
 	}
 
@@ -291,7 +364,7 @@ func outputResult(f *rootFlags, spec llm.Spec, res *assist.Result, explain bool)
 		if err := output.CopyToClipboard(res.Command); err != nil {
 			return fmt.Errorf("failed to copy to clipboard: %w", err)
 		}
-		if !f.json {
+		if !f.json && !f.quiet {
 			fmt.Fprintln(os.Stderr, "✓ Copied to clipboard")
 		}
 	}

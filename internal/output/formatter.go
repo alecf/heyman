@@ -22,7 +22,8 @@ type Metadata struct {
 	TokensInput  int64    `json:"tokens_input"`
 	TokensOutput int64    `json:"tokens_output"`
 	Cached       bool     `json:"cached"`
-	Cost         *float64 `json:"cost,omitempty"` // nil when unknown or free
+	Cost         *float64 `json:"cost,omitempty"` // nil when unknown or free; 0 when cached
+	Notes        []string `json:"notes,omitempty"`
 }
 
 // FormatJSON formats the output as JSON
@@ -37,6 +38,7 @@ func FormatJSON(res *assist.Result, explain bool, cost *float64) (string, error)
 			TokensOutput: res.Usage.OutputTokens,
 			Cached:       res.Cached,
 			Cost:         cost,
+			Notes:        res.Notes,
 		},
 	}
 	if explain {

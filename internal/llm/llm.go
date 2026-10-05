@@ -10,6 +10,7 @@ package llm
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"sort"
@@ -95,14 +96,24 @@ func ParseSpec(s string) (Spec, error) {
 		return Spec{}, fmt.Errorf("empty model")
 	}
 	if p, m, ok := strings.Cut(s, "/"); ok {
-		if _, known := providers[p]; known {
+		if _, known := providers[strings.ToLower(p)]; known {
+			m = strings.TrimSpace(m)
 			if m == "" {
 				return Spec{}, fmt.Errorf("model %q: missing model name after %q", s, p+"/")
 			}
-			return Spec{Provider: p, Model: m}, nil
+			return Spec{Provider: strings.ToLower(p), Model: m}, nil
 		}
 	}
+	if _, known := providers[strings.ToLower(s)]; known {
+		return Spec{}, fmt.Errorf("model %q is a provider name; use %s/<model>", s, strings.ToLower(s))
+	}
 	switch {
+	case strings.HasPrefix(s, "ft:"):
+		// OpenAI fine-tunes: ft:gpt-4o-mini:org::id
+		return Spec{OpenAI, s}, nil
+	case strings.Contains(s, ":") && !strings.Contains(s, "/"):
+		// Ollama "name:tag" (checked before gpt- so gpt-oss:20b is Ollama).
+		return Spec{Ollama, s}, nil
 	case strings.HasPrefix(s, "claude-"):
 		return Spec{Anthropic, s}, nil
 	case strings.HasPrefix(s, "gpt-"), strings.HasPrefix(s, "chatgpt-"),
@@ -110,11 +121,13 @@ func ParseSpec(s string) (Spec, error) {
 		return Spec{OpenAI, s}, nil
 	case strings.HasPrefix(s, "gemini-"):
 		return Spec{Google, s}, nil
-	case strings.Contains(s, ":") && !strings.Contains(s, "/"):
-		return Spec{Ollama, s}, nil
 	}
-	return Spec{}, fmt.Errorf("can't tell which provider serves %q; use provider/model (providers: %s)",
-		s, strings.Join(Providers(), ", "))
+	hint := ""
+	if !strings.Contains(s, "/") {
+		hint = fmt.Sprintf(" (for a local Ollama model, use ollama/%s)", s)
+	}
+	return Spec{}, fmt.Errorf("can't tell which provider serves %q; use provider/model%s (providers: %s)",
+		s, hint, strings.Join(Providers(), ", "))
 }
 
 // Options override provider defaults.
@@ -131,7 +144,7 @@ func NewLanguageModel(ctx context.Context, spec Spec, opts Options) (fantasy.Lan
 	}
 	needKey := func() error {
 		if key == "" {
-			return fmt.Errorf("%s requires an API key: set %s", spec.Provider, APIKeyEnv(spec.Provider))
+			return fmt.Errorf("%s requires an API key: set %s", spec.Provider, strings.Join(providers[spec.Provider], " or "))
 		}
 		return nil
 	}
@@ -200,18 +213,41 @@ func NewLanguageModel(ctx context.Context, spec Spec, opts Options) (fantasy.Lan
 }
 
 // OllamaBaseURL returns the OpenAI-compatible endpoint for the local Ollama
-// server, honouring OLLAMA_HOST (which may omit the scheme, e.g. "0.0.0.0:11434").
+// server, honouring OLLAMA_HOST the way the ollama CLI does: the scheme and
+// port may be omitted ("0.0.0.0", "myhost:1234", ":11434", "[::]:11434"),
+// and a wildcard listen address means "connect to localhost".
 func OllamaBaseURL() string {
-	host := strings.TrimSpace(os.Getenv("OLLAMA_HOST"))
+	return ollamaBaseURL(os.Getenv("OLLAMA_HOST"))
+}
+
+func ollamaBaseURL(host string) string {
+	host = strings.TrimSpace(host)
 	if host == "" {
-		host = "http://localhost:11434"
+		return "http://localhost:11434/v1"
 	}
-	if !strings.Contains(host, "://") {
-		host = "http://" + host
+	scheme := "http"
+	if s, rest, ok := strings.Cut(host, "://"); ok {
+		scheme, host = s, rest
 	}
-	if u, err := url.Parse(host); err == nil && u.Hostname() == "0.0.0.0" {
-		u.Host = strings.Replace(u.Host, "0.0.0.0", "localhost", 1)
-		host = u.String()
+	path := ""
+	if i := strings.Index(host, "/"); i >= 0 {
+		host, path = host[:i], strings.TrimRight(host[i:], "/")
 	}
-	return strings.TrimRight(host, "/") + "/v1"
+	hostname, port, err := net.SplitHostPort(host)
+	if err != nil {
+		// No port.
+		hostname, port = strings.Trim(host, "[]"), ""
+	}
+	if port == "" {
+		port = "11434"
+		if scheme == "https" {
+			port = "443"
+		}
+	}
+	switch hostname {
+	case "", "0.0.0.0", "::":
+		hostname = "localhost"
+	}
+	u := url.URL{Scheme: scheme, Host: net.JoinHostPort(hostname, port), Path: path + "/v1"}
+	return u.String()
 }

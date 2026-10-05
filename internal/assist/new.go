@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/alecf/heyman/internal/llm"
+	"github.com/alecf/heyman/internal/manpage"
 )
 
 // Config selects and configures a backend.
@@ -17,6 +18,9 @@ type Config struct {
 // New returns an Answerer for cfg.Model: a fantasy-backed Assistant for API
 // providers, or the claude CLI wrapper for "claude-code/…".
 func New(ctx context.Context, cfg Config) (Answerer, llm.Spec, error) {
+	if cfg.Man == nil {
+		cfg.Man = manpage.NewFetcher()
+	}
 	model := cfg.Model
 	if model == "" {
 		model = llm.DefaultModel
@@ -26,7 +30,7 @@ func New(ctx context.Context, cfg Config) (Answerer, llm.Spec, error) {
 		return nil, llm.Spec{}, err
 	}
 	if spec.Provider == llm.ClaudeCode {
-		return &ClaudeCode{Model: spec.Model, Man: cfg.Man}, spec, nil
+		return &ClaudeCode{Model: spec.Model, Man: cfg.Man, OnEvent: cfg.OnEvent}, spec, nil
 	}
 	lm, err := llm.NewLanguageModel(ctx, spec, llm.Options{BaseURL: cfg.BaseURL})
 	if err != nil {
@@ -40,15 +44,17 @@ func New(ctx context.Context, cfg Config) (Answerer, llm.Spec, error) {
 	}, spec, nil
 }
 
-// PromptPreview returns the system and user prompts Ask would send, without
-// calling a model (for --dry-run).
+// PromptPreview returns the system and user prompts Ask would send to a
+// tool-calling model, without calling it (for --dry-run and --debug). The
+// claude-code backend and the no-tools fallback use a variant without the
+// tool instructions.
 func PromptPreview(man ManSource, req Request) (system, user string, err error) {
-	var preload string
-	if req.Command != "" {
-		preload, err = man.Fetch(req.Command, req.Section)
-		if err != nil {
-			return "", "", err
-		}
+	if man == nil {
+		man = manpage.NewFetcher()
 	}
-	return systemPrompt(req, preload, 48000, true), userPrompt(req), nil
+	req, preload, missing, err := preparePreload(man, req)
+	if err != nil {
+		return "", "", err
+	}
+	return systemPrompt(req, preload, 48000, true, missing), userPrompt(req), nil
 }

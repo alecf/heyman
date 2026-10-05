@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"charm.land/fantasy"
 	"github.com/alecf/heyman/internal/manpage"
@@ -60,6 +61,10 @@ type Result struct {
 	Usage       Usage      `json:"usage"`
 	Model       string     `json:"model"`
 	Cached      bool       `json:"cached,omitempty"`
+	// Notes are things the user may want to know about how the answer was
+	// produced (e.g. the named command had no man page, or tool calling was
+	// unsupported and heyman fell back to a single prompt).
+	Notes []string `json:"notes,omitempty"`
 	// CostUSD is set by providers that report cost themselves (claude-code).
 	CostUSD *float64 `json:"cost_usd,omitempty"`
 }
@@ -73,9 +78,10 @@ type Answerer interface {
 	Ask(ctx context.Context, req Request) (*Result, error)
 }
 
-// Event reports progress during Ask (e.g. for a spinner).
+// Event reports progress during Ask (e.g. for a spinner). Events are
+// delivered one at a time, even when tools run in parallel.
 type Event struct {
-	Kind   string // "tool"
+	Kind   string // "tool" or "note"
 	Tool   string
 	Detail string
 }
@@ -100,9 +106,22 @@ type Assistant struct {
 	NoTools bool
 
 	OnEvent func(Event)
+	eventMu sync.Mutex
+}
+
+func (a *Assistant) emit(e Event) {
+	if a.OnEvent == nil {
+		return
+	}
+	a.eventMu.Lock()
+	defer a.eventMu.Unlock()
+	a.OnEvent(e)
 }
 
 func (a *Assistant) defaults() {
+	if a.Man == nil {
+		a.Man = manpage.NewFetcher()
+	}
 	if a.MaxSteps == 0 {
 		a.MaxSteps = 10
 	}
@@ -117,53 +136,98 @@ func (a *Assistant) defaults() {
 	}
 }
 
-// Ask runs the tool loop and returns the command.
+// Ask runs the tool loop and returns the command. On ErrNoCommand the
+// partial Result (usage, tool calls) is returned too.
 func (a *Assistant) Ask(ctx context.Context, req Request) (*Result, error) {
 	a.defaults()
 	if strings.TrimSpace(req.Question) == "" {
 		return nil, fmt.Errorf("no question specified")
 	}
 
-	run := &run{a: a, req: req, pages: map[string]string{}}
-
-	var preload string
+	req, preload, missing, err := preparePreload(a.Man, req)
+	if err != nil {
+		return nil, err
+	}
+	run := &run{a: a, req: req, missing: missing, pages: map[string]string{}}
+	if missing != "" {
+		run.note(missingNote(missing))
+	}
 	if req.Command != "" {
-		page, err := a.Man.Fetch(req.Command, req.Section)
-		if err != nil {
-			return nil, err
-		}
-		run.cachePage(req.Command, req.Section, page)
+		run.cachePage(req.Command, req.Section, preload)
 		run.consulted(req.Command, req.Section)
-		preload = page
 	}
 
 	res, err := run.generate(ctx, preload, !a.NoTools)
-	if err != nil && !a.NoTools && toolsUnsupported(err) {
+	if err != nil && res == nil && !a.NoTools && toolsUnsupported(err) {
 		// Some local models reject tool definitions outright; fall back to a
 		// single-shot prompt with the preloaded page.
 		run.reset()
+		run.note("this model does not support tool calling; answered without reading man pages")
 		res, err = run.generate(ctx, preload, false)
 	}
 	return res, err
 }
 
+// preparePreload fetches the named command's man page. If the command has no
+// man page (it may not be installed, or the first word was just part of the
+// request, as in `heyman how do I …`), the request is turned into a free-form
+// one: the command word is folded back into the question and missing is set.
+func preparePreload(man ManSource, req Request) (out Request, preload, missing string, err error) {
+	if req.Command == "" {
+		return req, "", "", nil
+	}
+	page, err := man.Fetch(req.Command, req.Section)
+	if err == nil {
+		return req, page, "", nil
+	}
+	if req.Section != "" || !errors.Is(err, manpage.ErrNotFound) {
+		// An explicit section means the user is sure it's a man page.
+		return req, "", "", err
+	}
+	missing = req.Command
+	req.Question = strings.TrimSpace(req.Command + " " + req.Question)
+	req.Command = ""
+	return req, "", missing, nil
+}
+
+func missingNote(cmd string) string {
+	return fmt.Sprintf("no man page for %q on this machine; treated the whole request as free-form", cmd)
+}
+
 func toolsUnsupported(err error) bool {
 	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "does not support tools") ||
-		strings.Contains(msg, "tools are not supported") ||
-		strings.Contains(msg, "tool use is not supported")
+	for _, s := range []string{
+		"does not support tools",        // ollama
+		"tools are not supported",       //
+		"tool use is not supported",     //
+		"support tool use",              // openrouter: "No endpoints found that support tool use"
+		"does not support function",     // various openai-compatible servers
+		"function calling is not",       //
+		"tools param requires --jinja",  // llama.cpp server
+		"\"auto\" tool choice requires", // vLLM without --enable-auto-tool-choice
+	} {
+		if strings.Contains(msg, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // run holds per-request state shared with the tool closures.
 type run struct {
-	a   *Assistant
-	req Request
+	a       *Assistant
+	req     Request
+	missing string // command named by the user that has no man page
 
 	mu        sync.Mutex
 	pages     map[string]string // "name(section)" -> cleaned page
 	manPages  []string
 	toolCalls []ToolCall
+	notes     []string
 	answer    *answerInput
+	// rejected is the last answer refused for lacking an explanation; used
+	// if the model never retries.
+	rejected *answerInput
 }
 
 func (r *run) reset() {
@@ -171,6 +235,14 @@ func (r *run) reset() {
 	defer r.mu.Unlock()
 	r.toolCalls = nil
 	r.answer = nil
+	r.rejected = nil
+}
+
+func (r *run) note(msg string) {
+	r.mu.Lock()
+	r.notes = append(r.notes, msg)
+	r.mu.Unlock()
+	r.a.emit(Event{Kind: "note", Detail: msg})
 }
 
 func pageKey(name, section string) string {
@@ -202,21 +274,33 @@ func (r *run) record(call ToolCall) {
 	r.mu.Lock()
 	r.toolCalls = append(r.toolCalls, call)
 	r.mu.Unlock()
-	if r.a.OnEvent != nil {
-		r.a.OnEvent(Event{Kind: "tool", Tool: call.Tool, Detail: call.Input})
-	}
+	r.a.emit(Event{Kind: "tool", Tool: call.Tool, Detail: call.Input})
 }
+
+// finalStepNote is appended to the system prompt on the last allowed step,
+// when only the answer tool is offered.
+const finalStepNote = "\n\nYou have run out of tool calls. Call the `answer` tool now with your best command."
 
 func (r *run) generate(ctx context.Context, preload string, withTools bool) (*Result, error) {
 	a := r.a
+	system := systemPrompt(r.req, preload, a.PreloadChars, withTools, r.missing)
 	opts := []fantasy.AgentOption{
-		fantasy.WithSystemPrompt(systemPrompt(r.req, preload, a.PreloadChars, withTools)),
+		fantasy.WithSystemPrompt(system),
 		fantasy.WithMaxOutputTokens(a.MaxOutputTokens),
 	}
 	if withTools {
+		final := system + finalStepNote
 		opts = append(opts,
 			fantasy.WithTools(r.manTool(), r.manSearchTool(), r.whichTool(), r.answerTool()),
 			fantasy.WithStopConditions(fantasy.StepCountIs(a.MaxSteps)),
+			// On the last step, offer only `answer` so the loop ends with a
+			// command instead of one more man page read.
+			fantasy.WithPrepareStep(func(ctx context.Context, o fantasy.PrepareStepFunctionOptions) (context.Context, fantasy.PrepareStepResult, error) {
+				if o.StepNumber < a.MaxSteps-1 {
+					return ctx, fantasy.PrepareStepResult{}, nil
+				}
+				return ctx, fantasy.PrepareStepResult{ActiveTools: []string{"answer"}, System: &final}, nil
+			}),
 		)
 	}
 	agent := fantasy.NewAgent(a.Model, opts...)
@@ -239,15 +323,26 @@ func (r *run) generate(ctx context.Context, preload string, withTools bool) (*Re
 	r.mu.Lock()
 	res.ManPages = append([]string(nil), r.manPages...)
 	res.ToolCalls = append([]ToolCall(nil), r.toolCalls...)
-	answer := r.answer
+	res.Notes = append([]string(nil), r.notes...)
+	answer, rejected := r.answer, r.rejected
 	r.mu.Unlock()
 
-	if answer != nil {
+	switch {
+	case answer != nil:
 		res.Command = cleanCommand(answer.Command)
 		res.Explanation = strings.TrimSpace(answer.Explanation)
-	} else {
-		// No answer tool call: fall back to parsing the final text.
+	default:
+		// No accepted answer call: parse the final text (models that reply
+		// in prose, or the no-tools fallback).
 		res.Command, res.Explanation = ParseText(out.Response.Content.Text())
+		if res.Command == "" && rejected != nil {
+			// The model answered without the requested explanation and
+			// never retried; a command without explanation beats nothing.
+			res.Command = cleanCommand(rejected.Command)
+		}
+	}
+	if !r.req.Explain && !withTools {
+		res.Explanation = ""
 	}
 	if res.Command == "" {
 		return res, ErrNoCommand
@@ -334,7 +429,7 @@ func (r *run) manSearchTool() fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse(err.Error()), nil
 			}
 			r.record(call)
-			return fantasy.NewTextResponse(limitLines(out, 60)), nil
+			return fantasy.NewTextResponse(cutAtLine(limitLines(out, 60), r.a.PageChars)), nil
 		})
 }
 
@@ -372,6 +467,9 @@ func (r *run) answerTool() fantasy.AgentTool {
 				return fantasy.NewTextErrorResponse("command must not be empty"), nil
 			}
 			if r.req.Explain && strings.TrimSpace(in.Explanation) == "" {
+				r.mu.Lock()
+				r.rejected = &in
+				r.mu.Unlock()
 				return fantasy.NewTextErrorResponse("the user asked for an explanation: call answer again with an explanation"), nil
 			}
 			r.mu.Lock()
@@ -387,7 +485,7 @@ func (r *run) answerTool() fantasy.AgentTool {
 
 // --- prompts ---
 
-func systemPrompt(req Request, preload string, preloadChars int, withTools bool) string {
+func systemPrompt(req Request, preload string, preloadChars int, withTools bool, missing string) string {
 	var b strings.Builder
 	b.WriteString(`You are heyman, an expert on the Unix command line. The user describes something they want to do in a terminal; you give them a single shell command that does it on their machine.
 
@@ -401,8 +499,10 @@ func systemPrompt(req Request, preload string, preloadChars int, withTools bool)
 	b.WriteString("- Use only flags that exist on this machine. ")
 	if withTools {
 		b.WriteString("When you are not certain a flag exists here or what it does, read the man page with the `man` tool (use `search` to find options in long pages). Check every program in a pipeline you are unsure about, not just the first one.\n")
-	} else {
+	} else if req.Command != "" {
 		b.WriteString("Rely on the man page below.\n")
+	} else {
+		b.WriteString("If you are unsure whether a flag exists on this system, prefer the portable (POSIX) form.\n")
 	}
 	b.WriteString("- If the request names concrete values (files, ports, patterns), use them. Otherwise use descriptive placeholders like <PID> or <file>.\n")
 	b.WriteString("- Prefer read-only, non-destructive commands. Don't add sudo unless it is required.\n")
@@ -420,6 +520,9 @@ func systemPrompt(req Request, preload string, preloadChars int, withTools bool)
 		b.WriteString("- Reply with ONLY the command. No explanation, no markdown, no code fences.\n")
 	}
 
+	if missing != "" {
+		fmt.Fprintf(&b, "\nThe request starts with `%s`, which has no man page on this machine: it may not be installed, or it may just be the first word of the request.\n", missing)
+	}
 	if req.Command != "" {
 		fmt.Fprintf(&b, "\nThe user asked specifically about `%s`; the command will most likely use it, possibly combined with other programs.\n", req.Command)
 		page := preload
@@ -480,7 +583,9 @@ var fence = regexp.MustCompile("(?s)```[a-zA-Z]*\\s*\\n?(.*?)```")
 
 // ParseText extracts a command (and optional explanation) from a free-text
 // model reply: the contents of the first code fence if there is one,
-// otherwise the first non-empty line.
+// otherwise the first line that isn't an introduction ("Here is the
+// command:"). Replies that read as prose or a refusal ("I can't help with
+// that.") yield no command.
 func ParseText(text string) (command, explanation string) {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -488,17 +593,61 @@ func ParseText(text string) (command, explanation string) {
 	}
 	if m := fence.FindStringSubmatchIndex(text); m != nil {
 		command = cleanCommand(text[m[2]:m[3]])
-		rest := strings.TrimSpace(text[:m[0]] + "\n" + text[m[1]:])
+		rest := strings.TrimSpace(strings.TrimSpace(text[:m[0]]) + "\n" + strings.TrimSpace(text[m[1]:]))
+		if command == "" {
+			return "", ""
+		}
 		return command, rest
 	}
 	lines := strings.Split(text, "\n")
 	for i, line := range lines {
-		if strings.TrimSpace(line) == "" {
+		line = strings.TrimSpace(line)
+		if line == "" {
 			continue
+		}
+		if strings.HasSuffix(line, ":") && strings.Contains(line, " ") {
+			continue // "Here's the command:" — the command follows
+		}
+		if looksLikeProse(line) {
+			return "", ""
 		}
 		return cleanCommand(line), strings.TrimSpace(strings.Join(lines[i+1:], "\n"))
 	}
 	return "", ""
+}
+
+// proseStarts are first words of English sentences that are not commands.
+var proseStarts = map[string]bool{
+	"i": true, "i'm": true, "i'll": true, "i've": true, "i'd": true, "im": true,
+	"sorry": true, "unfortunately": true, "apologies": true, "however": true,
+	"here": true, "here's": true, "heres": true, "the": true, "this": true, "that": true, "that's": true,
+	"there": true, "there's": true, "it": true, "it's": true, "you": true, "your": true,
+	"sure": true, "certainly": true, "okay": true, "based": true, "note": true,
+	"to": true, "we": true, "let's": true, "a": true, "an": true, "my": true,
+	"unable": true, "cannot": true, "can't": true, "no": true,
+}
+
+// looksLikeProse reports whether line reads as an English sentence rather
+// than a shell command.
+func looksLikeProse(line string) bool {
+	line = strings.TrimSpace(strings.Trim(strings.TrimSpace(line), "*_`\"'"))
+	if line == "" {
+		return true
+	}
+	fields := strings.Fields(line)
+	first := strings.ToLower(strings.TrimRight(fields[0], ",.:;!?"))
+	first = strings.ReplaceAll(first, "’", "'")
+	if proseStarts[first] {
+		return true
+	}
+	if len(fields) >= 2 {
+		second := strings.ToLower(fields[1])
+		// "Let me…", "As an AI…" (let and as are also real commands).
+		if (first == "let" && second == "me") || (first == "as" && (second == "an" || second == "a")) {
+			return true
+		}
+	}
+	return false
 }
 
 // cleanCommand strips formatting models commonly wrap commands in.
@@ -512,7 +661,11 @@ func cleanCommand(s string) string {
 		}
 	}
 	s = strings.TrimSpace(s)
-	s = strings.Trim(s, "`")
+	// Strip inline-code backticks wrapping the whole command, but keep
+	// command substitution such as "echo `date`".
+	for len(s) >= 2 && s[0] == '`' && s[len(s)-1] == '`' && strings.Count(s[1:len(s)-1], "`")%2 == 0 {
+		s = strings.TrimSpace(s[1 : len(s)-1])
+	}
 	s = strings.TrimPrefix(s, "$ ")
 	return strings.TrimSpace(s)
 }
@@ -520,14 +673,18 @@ func cleanCommand(s string) string {
 // Chunk returns page[offset:offset+limit] cut at a line boundary, with a
 // header telling the model how to continue.
 func Chunk(name, page string, offset, limit int) string {
-	if offset < 0 || offset >= len(page) {
+	if offset < 0 {
 		offset = 0
 	}
-	rest := page[offset:]
-	body := rest
-	if len(rest) > limit {
-		body = cutAtLine(rest, limit)
+	if offset > 0 && offset >= len(page) {
+		return fmt.Sprintf("[man %s: offset %d is past the end of the page (%d characters)]", name, offset, len(page))
 	}
+	// Don't start in the middle of a UTF-8 sequence.
+	for offset > 0 && offset < len(page) && !utf8.RuneStart(page[offset]) {
+		offset--
+	}
+	rest := page[offset:]
+	body := cutAtLine(rest, limit)
 	end := offset + len(body)
 	if offset == 0 && end >= len(page) {
 		return body
@@ -539,21 +696,38 @@ func Chunk(name, page string, offset, limit int) string {
 	return header + "]\n" + body
 }
 
+// cutAtLine returns a prefix of s of at most limit bytes, ending at a line
+// break if there's one in the second half, and never splitting a UTF-8
+// sequence.
 func cutAtLine(s string, limit int) string {
 	if len(s) <= limit {
 		return s
 	}
+	if limit <= 0 {
+		return ""
+	}
 	cut := s[:limit]
 	if i := strings.LastIndex(cut, "\n"); i > limit/2 {
-		cut = cut[:i+1]
+		return cut[:i+1]
+	}
+	for len(cut) > 0 && !utf8.RuneStart(s[len(cut)]) {
+		cut = cut[:len(cut)-1]
 	}
 	return cut
 }
+
+// maxPattern bounds the regex a model may send to Grep. Go's regexp is
+// linear-time (RE2), so there is no catastrophic backtracking, but a huge
+// pattern is still expensive to compile.
+const maxPattern = 200
 
 // Grep returns lines of page matching pattern (case-insensitive regex, or a
 // literal if the pattern doesn't compile), with context lines around each
 // match, capped at limit characters.
 func Grep(page, pattern string, context, limit int) string {
+	if len(pattern) > maxPattern {
+		return fmt.Sprintf("search pattern too long (%d characters; max %d)", len(pattern), maxPattern)
+	}
 	re, err := regexp.Compile("(?i)" + pattern)
 	if err != nil {
 		re = regexp.MustCompile("(?i)" + regexp.QuoteMeta(pattern))
@@ -574,19 +748,22 @@ func Grep(page, pattern string, context, limit int) string {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "[%d matching lines for %q]\n", matches, pattern)
+	const truncated = "[more matches truncated; use a narrower search]\n"
 	prev := -2
 	for i, k := range keep {
 		if !k {
 			continue
 		}
+		sep := ""
 		if prev >= 0 && i != prev+1 {
-			b.WriteString("--\n")
+			sep = "--\n"
 		}
-		prev = i
-		if b.Len()+len(lines[i]) > limit {
-			b.WriteString("[more matches truncated; use a narrower search]\n")
+		if b.Len()+len(sep)+len(lines[i])+1+len(truncated) > limit {
+			b.WriteString(truncated)
 			break
 		}
+		prev = i
+		b.WriteString(sep)
 		b.WriteString(lines[i])
 		b.WriteString("\n")
 	}

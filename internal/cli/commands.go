@@ -2,10 +2,15 @@ package cli
 
 import (
 	"bufio"
+	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
+	"os/exec"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/alecf/heyman/internal/cache"
 	"github.com/alecf/heyman/internal/config"
@@ -20,15 +25,16 @@ var validModelName = regexp.MustCompile(`^[a-zA-Z0-9._:/-]+$`)
 // sizePattern matches size indicators like 1b, 7b, 70b, 270b
 var sizePattern = regexp.MustCompile(`(?i)^(\d+[bB])`)
 
-// sanitizeProfileName creates a safe profile name from user input
+var (
+	unsafeProfileChars = regexp.MustCompile(`[^a-z0-9_-]`)
+	hyphenRuns         = regexp.MustCompile(`-+`)
+)
+
+// sanitizeProfileName creates a safe, lowercase profile name from user input
 func sanitizeProfileName(input string) string {
-	// Only allow alphanumeric, hyphens, and underscores
-	safe := regexp.MustCompile(`[^a-zA-Z0-9_-]`).ReplaceAllString(input, "-")
-	// Remove leading/trailing hyphens
-	safe = strings.Trim(safe, "-")
-	// Collapse multiple hyphens
-	safe = regexp.MustCompile(`-+`).ReplaceAllString(safe, "-")
-	return safe
+	safe := unsafeProfileChars.ReplaceAllString(strings.ToLower(input), "-")
+	safe = hyphenRuns.ReplaceAllString(safe, "-")
+	return strings.Trim(safe, "-")
 }
 
 // extractSizeSuffix extracts a meaningful size suffix from a model tag
@@ -68,15 +74,20 @@ func generateProfileName(cfg *config.Config, provider, model string) string {
 	var baseName, tag string
 
 	// Split model into base and tag (for Ollama-style names)
-	if idx := strings.Index(model, ":"); idx != -1 {
-		baseName = model[:idx]
-		tag = model[idx+1:]
-	} else {
-		baseName = model
-		tag = ""
+	baseName, tag, _ = strings.Cut(model, ":")
+	// OpenRouter ids and Hugging Face paths ("moonshotai/kimi-k2",
+	// "hf.co/unsloth/Qwen3-4B-GGUF"): the last path element names the model.
+	if i := strings.LastIndex(baseName, "/"); i >= 0 && i < len(baseName)-1 {
+		baseName = baseName[i+1:]
 	}
 
 	sanitizedBase := sanitizeProfileName(baseName)
+	if sanitizedBase == "" {
+		sanitizedBase = sanitizeProfileName(provider)
+	}
+	if sanitizedBase == "" {
+		sanitizedBase = "profile"
+	}
 	sizeSuffix := extractSizeSuffix(tag)
 
 	// Try just the base name first
@@ -154,6 +165,10 @@ func profileListCmd() *cobra.Command {
 				fmt.Println("No profiles configured. Run 'heyman profile setup' to create one.")
 				return nil
 			}
+			if cfg.DefaultProfile != "" && !cfg.ProfileExists(cfg.DefaultProfile) {
+				fmt.Fprintf(os.Stderr, "Warning: default_profile %q doesn't match any profile; fix with: heyman profile set-default <name>\n", cfg.DefaultProfile)
+			}
+			active, _ := cfg.ActiveProfile()
 
 			// Find max lengths for alignment
 			maxName := 0
@@ -170,7 +185,7 @@ func profileListCmd() *cobra.Command {
 			for _, name := range cfg.SortedProfileNames() {
 				profile := cfg.Profiles[name]
 				marker := " "
-				if name == cfg.DefaultProfile {
+				if name == active {
 					marker = "*"
 				}
 				fmt.Printf("%s %-*s  %-*s  %s\n", marker, maxName, name, maxProvider, profile.Provider, profile.Model)
@@ -201,13 +216,23 @@ You can also set up profiles manually by editing:
 			}
 
 			reader := bufio.NewReader(os.Stdin)
+			var inputErr error
 			ask := func(prompt, def string) string {
+				if inputErr != nil {
+					return ""
+				}
 				if def != "" {
 					fmt.Printf("%s [%s]: ", prompt, def)
 				} else {
 					fmt.Printf("%s: ", prompt)
 				}
-				line, _ := reader.ReadString('\n')
+				line, err := reader.ReadString('\n')
+				if err != nil && line == "" {
+					// EOF: don't silently create a profile from defaults.
+					inputErr = fmt.Errorf("setup needs interactive input (stdin closed)")
+					fmt.Println()
+					return ""
+				}
 				line = strings.TrimSpace(line)
 				if line == "" {
 					return def
@@ -220,6 +245,9 @@ You can also set up profiles manually by editing:
 				fmt.Printf("  %d) %-14s %s\n", i+1, p.name, p.blurb)
 			}
 			choice := ask(fmt.Sprintf("\nChoice [1-%d]", len(setupProviders)), "1")
+			if inputErr != nil {
+				return inputErr
+			}
 			idx := 0
 			if _, err := fmt.Sscanf(choice, "%d", &idx); err != nil || idx < 1 || idx > len(setupProviders) {
 				return fmt.Errorf("invalid choice %q", choice)
@@ -227,6 +255,9 @@ You can also set up profiles manually by editing:
 			sp := setupProviders[idx-1]
 
 			model := ask("Model", sp.defaultModel)
+			if inputErr != nil {
+				return inputErr
+			}
 			if model == "" {
 				return fmt.Errorf("a model name is required")
 			}
@@ -237,6 +268,9 @@ You can also set up profiles manually by editing:
 			var baseURL string
 			if sp.name == llm.OpenAICompat {
 				baseURL = ask("Base URL (e.g. http://localhost:8080/v1)", "")
+				if inputErr != nil {
+					return inputErr
+				}
 				if baseURL == "" {
 					return fmt.Errorf("openai-compat needs a base URL")
 				}
@@ -301,12 +335,7 @@ func profileDeleteCmd() *cobra.Command {
 
 			// Check if profile exists
 			if !cfg.ProfileExists(profileName) {
-				fmt.Printf("Profile '%s' not found.\n\n", profileName)
-				fmt.Println("Available profiles:")
-				for _, name := range cfg.SortedProfileNames() {
-					fmt.Printf("  - %s\n", name)
-				}
-				return fmt.Errorf("profile not found")
+				return profileNotFound(cfg, profileName)
 			}
 
 			// Confirm deletion unless --force
@@ -362,12 +391,7 @@ func profileSetDefaultCmd() *cobra.Command {
 
 			// Check if profile exists
 			if !cfg.ProfileExists(profileName) {
-				fmt.Printf("Profile '%s' not found.\n\n", profileName)
-				fmt.Println("Available profiles:")
-				for _, name := range cfg.SortedProfileNames() {
-					fmt.Printf("  - %s\n", name)
-				}
-				return fmt.Errorf("profile not found")
+				return profileNotFound(cfg, profileName)
 			}
 
 			// Update default profile
@@ -416,12 +440,7 @@ func profileShowCmd() *cobra.Command {
 
 			profile, ok := cfg.Profiles[profileName]
 			if !ok {
-				fmt.Printf("Profile '%s' not found.\n\n", profileName)
-				fmt.Println("Available profiles:")
-				for _, name := range cfg.SortedProfileNames() {
-					fmt.Printf("  - %s\n", name)
-				}
-				return fmt.Errorf("profile not found")
+				return profileNotFound(cfg, profileName)
 			}
 
 			isDefault := ""
@@ -432,9 +451,10 @@ func profileShowCmd() *cobra.Command {
 			fmt.Printf("Profile: %s%s\n", profileName, isDefault)
 			fmt.Printf("  Provider:       %s\n", profile.Provider)
 			fmt.Printf("  Model:          %s\n", profile.Model)
-			if profile.ContextWindow > 0 {
-				fmt.Printf("  Context window: %d tokens\n", profile.ContextWindow)
+			if profile.BaseURL != "" {
+				fmt.Printf("  Base URL:       %s\n", profile.BaseURL)
 			}
+			fmt.Printf("  Use with:       heyman --profile %s …  (or --model %s)\n", profileName, profile.Spec())
 
 			return nil
 		},
@@ -464,7 +484,7 @@ func testConfigCmd() *cobra.Command {
 				profile := cfg.Profiles[name]
 				fmt.Printf("Testing %s (%s %s)... ", name, profile.Provider, profile.Model)
 
-				if _, err := llm.NewLanguageModel(cmd.Context(), llm.Spec{Provider: profile.Provider, Model: profile.Model}, llm.Options{BaseURL: profile.BaseURL}); err != nil && profile.Provider != llm.ClaudeCode {
+				if err := checkProfile(cmd.Context(), profile); err != nil {
 					fmt.Println(err)
 					hasErrors = true
 					continue
@@ -539,4 +559,77 @@ func clearCacheCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func profileNotFound(cfg *config.Config, name string) error {
+	names := cfg.SortedProfileNames()
+	if len(names) == 0 {
+		return fmt.Errorf("profile %q not found: no profiles configured (run: heyman profile setup)", name)
+	}
+	return fmt.Errorf("profile %q not found (available: %s)", name, strings.Join(names, ", "))
+}
+
+// checkProfile validates a profile without spending tokens: the provider and
+// model are set, credentials are present, and the claude CLI or local Ollama
+// server is reachable.
+func checkProfile(ctx context.Context, p config.Profile) error {
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	spec, err := llm.ParseSpec(p.Spec())
+	if err != nil {
+		return err
+	}
+	if spec.Provider == llm.ClaudeCode {
+		if _, err := exec.LookPath("claude"); err != nil {
+			return fmt.Errorf("the claude CLI is not on PATH")
+		}
+		return nil
+	}
+	if _, err := llm.NewLanguageModel(ctx, spec, llm.Options{BaseURL: p.BaseURL}); err != nil {
+		return err
+	}
+	if spec.Provider == llm.Ollama {
+		base := p.BaseURL
+		if base == "" {
+			base = llm.OllamaBaseURL()
+		}
+		if err := checkOllamaModel(ctx, base, spec.Model); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkOllamaModel asks the server's OpenAI-compatible /models endpoint
+// whether model is available.
+func checkOllamaModel(ctx context.Context, base, model string) error {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+"/models", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("can't reach Ollama at %s (is `ollama serve` running?)", base)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("ollama at %s: %s", base, resp.Status)
+	}
+	var list struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+		return fmt.Errorf("ollama at %s: %w", base, err)
+	}
+	for _, m := range list.Data {
+		if m.ID == model || (!strings.Contains(model, ":") && m.ID == model+":latest") {
+			return nil
+		}
+	}
+	return fmt.Errorf("model %s is not pulled (run: ollama pull %s)", model, model)
 }

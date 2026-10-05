@@ -52,12 +52,16 @@ func (db *Database) GetPricing(spec string) *ModelPricing {
 	if mp, ok := db.Models[spec]; ok {
 		return mp
 	}
+	// Longest prefix wins: "claude-opus-5-5-20260101" must match
+	// "claude-opus-5-5", not "claude-opus-5" (map order is random).
+	var best *ModelPricing
+	bestLen := 0
 	for key, mp := range db.Models {
-		if strings.HasPrefix(spec, key+"-") {
-			return mp
+		if len(key) > bestLen && strings.HasPrefix(spec, key+"-") {
+			best, bestLen = mp, len(key)
 		}
 	}
-	return nil
+	return best
 }
 
 // IsFree reports whether the provider runs models locally at no API cost.

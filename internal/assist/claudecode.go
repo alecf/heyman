@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/alecf/heyman/internal/manpage"
 )
 
 // ClaudeCode answers requests by shelling out to the `claude` CLI in print
@@ -22,12 +24,58 @@ type ClaudeCode struct {
 	// PreloadChars caps the preloaded man page. Default 48000.
 	PreloadChars int
 	Man          ManSource
+	// OnEvent receives notes (claude's own tool calls aren't streamed).
+	OnEvent func(Event)
 }
 
 // claudeAllowedTools are the only shell commands Claude Code may run.
+// Claude Code checks each part of a pipeline / && chain separately.
 var claudeAllowedTools = []string{
 	"Bash(man:*)", "Bash(apropos:*)", "Bash(whatis:*)", "Bash(which:*)",
 	"Bash(grep:*)", "Bash(head:*)", "Bash(col:*)",
+}
+
+// claudeDeniedTools close the obvious holes in the allowlist: `man -P cmd`
+// and `man -H cmd` run an arbitrary program. Deny rules are prefix matches,
+// so `man -aP cmd` would still get through; the sandbox below is what
+// actually contains that.
+var claudeDeniedTools = []string{
+	"Bash(man -P:*)", "Bash(man --pager:*)", "Bash(man -H:*)", "Bash(man --html:*)",
+	"Bash(apropos -P:*)", "Bash(whatis -P:*)",
+}
+
+// claudeSettings enables Claude Code's Bash sandbox (Seatbelt on macOS,
+// bubblewrap on Linux): commands can read but not write outside the empty
+// working directory and have no network, and may not ask to run unsandboxed.
+const claudeSettings = `{"sandbox":{"enabled":true,"autoAllowBashIfSandboxed":false,"allowUnsandboxedCommands":false}}`
+
+// claudeArgs builds the claude CLI arguments. --allowedTools and
+// --disallowedTools are variadic in the claude CLI, so they're passed as
+// single --flag=a,b values and nothing positional follows (the question goes
+// on stdin).
+func claudeArgs(model, system string) []string {
+	args := []string{
+		"-p",
+		"--output-format", "json",
+		"--system-prompt", system,
+		"--tools", "Bash",
+		"--setting-sources", "",
+		"--settings", claudeSettings,
+		"--strict-mcp-config",
+		"--no-session-persistence",
+		"--disable-slash-commands",
+		// Deny anything not explicitly allowed, regardless of the user's
+		// default permission mode.
+		"--permission-mode", "dontAsk",
+	}
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+	args = append(args,
+		"--disallowedTools="+strings.Join(claudeDeniedTools, ","),
+		"--allowedTools="+strings.Join(claudeAllowedTools, ","),
+	)
+	return args
 }
 
 type claudeCodeOutput struct {
@@ -65,18 +113,26 @@ func (c *ClaudeCode) Ask(ctx context.Context, req Request) (*Result, error) {
 		preloadChars = 48000
 	}
 
-	var preload string
-	var pages []string
+	man := c.Man
+	if man == nil {
+		man = manpage.NewFetcher()
+	}
+	req, preload, missing, err := preparePreload(man, req)
+	if err != nil {
+		return nil, err
+	}
+	var pages, notes []string
 	if req.Command != "" {
-		page, err := c.Man.Fetch(req.Command, req.Section)
-		if err != nil {
-			return nil, err
-		}
-		preload = page
 		pages = append(pages, pageKey(req.Command, req.Section))
 	}
+	if missing != "" {
+		notes = append(notes, missingNote(missing))
+		if c.OnEvent != nil {
+			c.OnEvent(Event{Kind: "note", Detail: notes[0]})
+		}
+	}
 
-	system := systemPrompt(req, preload, preloadChars, false) + `
+	system := systemPrompt(req, preload, preloadChars, false, missing) + `
 You can run read-only shell commands to check man pages on this machine: ` + "`man <page>`, `man <page> | grep -n -A3 -- '<option>'`, `man -k <keyword>`, `which <program>`" + `. Use them whenever you are not certain a flag exists here.
 Never run the user's command and never inspect their files or directories: you are only writing the command for them to run. Files the user mentions may not exist here; that's expected.
 Your final reply must follow the format above exactly.`
@@ -88,23 +144,7 @@ Your final reply must follow the format above exactly.`
 	}
 	defer os.RemoveAll(dir)
 
-	args := []string{
-		"-p",
-		"--output-format", "json",
-		"--system-prompt", system,
-		"--tools", "Bash",
-		"--setting-sources", "",
-		"--strict-mcp-config",
-		"--no-session-persistence",
-		"--disable-slash-commands",
-	}
-	if c.Model != "" {
-		args = append(args, "--model", c.Model)
-	}
-	args = append(args, "--allowedTools")
-	args = append(args, claudeAllowedTools...)
-
-	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd := exec.CommandContext(ctx, bin, claudeArgs(c.Model, system)...)
 	cmd.Dir = dir
 	cmd.Stdin = strings.NewReader(req.Question)
 	var stdout, stderr bytes.Buffer
@@ -126,8 +166,13 @@ Your final reply must follow the format above exactly.`
 		return nil, fmt.Errorf("claude CLI error: %s", out.Result)
 	}
 
+	modelName := c.Model
+	if modelName == "" {
+		modelName = "default"
+	}
 	res := &Result{
-		Model:    "claude-code/" + c.Model,
+		Model:    "claude-code/" + modelName,
+		Notes:    notes,
 		Steps:    out.NumTurns,
 		ManPages: pages,
 		Usage: Usage{
