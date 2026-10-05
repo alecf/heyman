@@ -1,4 +1,7 @@
-# GoReleaser configuration for heyman
+# GoReleaser configuration for heyman (GoReleaser v2)
+# Validate with: goreleaser check
+version: 2
+
 project_name: heyman
 
 before:
@@ -15,6 +18,7 @@ builds:
     goarch:
       - amd64
       - arm64
+    # cmd/heyman/main.go reads these for --version.
     ldflags:
       - -s -w
       - -X main.version={{.Version}}
@@ -23,7 +27,7 @@ builds:
     main: ./cmd/heyman
 
 archives:
-  - format: tar.gz
+  - formats: [tar.gz]
     name_template: >-
       {{ .ProjectName }}_
       {{- .Version }}_
@@ -31,33 +35,40 @@ archives:
       {{- .Arch }}
     format_overrides:
       - goos: windows
-        format: zip
+        formats: [zip]
 
 checksum:
-  name_template: 'checksums.txt'
+  name_template: "checksums.txt"
 
 snapshot:
-  name_template: "{{ incpatch .Version }}-next"
+  version_template: "{{ incpatch .Version }}-next"
 
 changelog:
   sort: asc
   filters:
     exclude:
-      - '^docs:'
-      - '^test:'
-      - '^chore:'
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
 
-# Homebrew tap
-brews:
+# Homebrew cask in github.com/alecf/homebrew-tap (Casks/heyman.rb).
+# Install with: brew install --cask alecf/tap/heyman
+homebrew_casks:
   - name: heyman
     homepage: https://github.com/alecf/heyman
-    description: "LLM-powered man page Q&A"
+    description: "Turn plain-English requests into shell commands, checked against local man pages"
     license: "MIT"
     repository:
       owner: alecf
       name: homebrew-tap
-    directory: Formula
-    install: |
-      bin.install "heyman"
-    test: |
-      system "#{bin}/heyman --version"
+    directory: Casks
+    binaries:
+      - heyman
+    hooks:
+      post:
+        # Release binaries aren't notarized; clear the quarantine flag so
+        # macOS will run them.
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/heyman"]
+          end

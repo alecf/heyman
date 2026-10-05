@@ -1,5 +1,7 @@
 # Profile Management and Prompt Improvements Design
 
+> **Historical.** This January 2026 design predates the October 2026 rebuild on fantasy with man-page tool calling. The profile commands it describes still exist, but the single-shot prompt design (no tools, strict retry prompt) and the provider list are out of date. See [docs/architecture.md](../architecture.md) for how heyman works now.
+
 ## Overview
 
 Four improvements to heyman:
