@@ -1,0 +1,278 @@
+================================================================================
+HEYMAN PROJECT - CONCURRENCY REVIEW EXECUTIVE SUMMARY
+================================================================================
+
+REVIEW DATE: 2026-01-13
+REVIEWER: Claude Code Concurrency Analysis
+PROJECT: github.com/alecf/heyman (Go CLI tool)
+SCOPE: 19 Go files across 11 packages
+
+================================================================================
+FINDINGS OVERVIEW
+================================================================================
+
+Total Issues Found: 10
+  - CRITICAL:  2 issues (requires immediate fix)
+  - HIGH:      4 issues (requires urgent fix within 1 week)
+  - MEDIUM:    3 issues (should fix within 1 month)
+  - LOW:       1 issue (refactoring/best practices)
+
+Risk Level: HIGH
+The two critical issues pose significant risk to production stability:
+  1. Race conditions in spinner component
+  2. Channel panics in query executor
+
+================================================================================
+CRITICAL ISSUES (2)
+================================================================================
+
+[CRITICAL] Issue #1: Spinner Race Condition
+  Location: internal/spinner/spinner.go (lines 18, 38, 57-58, 70, 73)
+  Type: Data Race
+  Risk: Memory corruption, undefined behavior, application crashes
+  Impact: HIGH - Affects UI spinner used in all queries
+  Fix Complexity: MEDIUM
+  Timeline: Within 48 hours
+  Solution: Add sync.RWMutex to synchronize access to 'active' and 'message'
+
+[CRITICAL] Issue #2: Query Executor Channel Panic
+  Location: internal/cli/query_executor.go (lines 36, 46-48, 64-66, 70)
+  Type: Channel Panic on Close
+  Risk: Runtime panic "send on closed channel", goroutine leaks
+  Impact: CRITICAL - Causes application crashes
+  Fix Complexity: MEDIUM
+  Timeline: Within 48 hours
+  Solution: Add defer cleanup, monitor context.Done(), ensure channel draining
+
+================================================================================
+HIGH SEVERITY ISSUES (4)
+================================================================================
+
+[HIGH] Issues #3-4: Goroutine Leaks in StreamQuery (OpenAI & Ollama)
+  Location: internal/llm/openai.go (65-122), internal/llm/ollama.go (88-157)
+  Type: Goroutine Leak
+  Risk: Unbuffered channels block indefinitely if caller stops reading
+  Impact: HIGH - Memory leak, resource exhaustion under load
+  Fix Complexity: MEDIUM
+  Timeline: Within 1 week
+  Solution: Use buffered channels (10+), check context.Done() before sends
+
+[HIGH] Issues #5-6: Channel Double Close (OpenAI & Ollama)
+  Location: internal/llm/openai.go (104-105), internal/llm/ollama.go (150-152)
+  Type: Channel Panic
+  Risk: Panic on second error, unpredictable behavior
+  Impact: HIGH - Application crashes on stream errors
+  Fix Complexity: LOW
+  Timeline: Within 1 week
+  Solution: Ensure error channel send happens before defer close
+
+================================================================================
+MEDIUM SEVERITY ISSUES (3)
+================================================================================
+
+[MEDIUM] Issue #7: Cache Race Condition
+  Location: internal/cache/cache.go (lines 41-72)
+  Type: Missing Synchronization
+  Risk: Cache corruption, lost metadata updates, TOCTOU race
+  Impact: MEDIUM - Data integrity issue, affects caching correctness
+  Fix Complexity: MEDIUM
+  Timeline: Within 1 month
+  Solution: Add sync.RWMutex to Cache struct
+
+[MEDIUM] Issue #8: Spinner Double Close
+  Location: internal/spinner/spinner.go (lines 74, 91)
+  Type: Channel Panic
+  Risk: Panic when Stop() called twice
+  Impact: MEDIUM - Application crash in edge cases
+  Fix Complexity: LOW
+  Timeline: Within 1 week
+  Solution: Use sync.Once to ensure channel closes only once
+
+[MEDIUM] Issue #9: Query Executor Missing Context Monitoring
+  Location: internal/cli/query_executor.go (lines 42-68)
+  Type: Deadlock Potential
+  Risk: Application hangs indefinitely on context cancellation
+  Impact: MEDIUM - Prevents graceful shutdown
+  Fix Complexity: LOW
+  Timeline: Within 1 month
+  Solution: Add case <-ctx.Done() to select statement
+
+================================================================================
+LOW SEVERITY ISSUES (1)
+================================================================================
+
+[LOW] Issue #10: Global State (Viper Configuration)
+  Location: internal/cli/root.go (lines 68-75)
+  Type: Global State Access
+  Risk: Future concurrency issues if CLI becomes concurrent
+  Impact: LOW - No current risk in single-threaded usage
+  Fix Complexity: HIGH
+  Timeline: Refactoring opportunity for next major version
+  Solution: Reduce reliance on global configuration state
+
+================================================================================
+ROOT CAUSE ANALYSIS
+================================================================================
+
+The identified issues stem from common concurrency anti-patterns:
+
+1. LACK OF SYNCHRONIZATION PRIMITIVES
+   - No mutexes protecting shared state (spinner, cache)
+   - Unbuffered channels used without consideration for blocking
+
+2. INCOMPLETE ERROR HANDLING
+   - Early returns without ensuring resource cleanup
+   - No defer statements for channel closure
+
+3. MISSING CONTEXT AWARENESS
+   - Goroutines don't check context cancellation
+   - No timeout mechanisms in critical paths
+
+4. CHANNEL PROTOCOL VIOLATIONS
+   - Multiple goroutines closing same channel
+   - Assumption that channels can always receive
+
+================================================================================
+IMMEDIATE ACTION REQUIRED
+================================================================================
+
+The following items must be addressed before next production release:
+
+WITHIN 24-48 HOURS:
+1. Fix Issue #1 (Spinner mutex) - Add sync.RWMutex
+2. Fix Issue #2 (Query executor channels) - Add cleanup and context monitoring
+
+WITHIN 1 WEEK:
+3. Fix Issues #3-4 (Goroutine leaks) - Buffer channels, check context
+4. Fix Issues #5-6 (Double close) - Fix error channel timing
+5. Fix Issue #8 (Double close panic) - Use sync.Once
+
+TESTING REQUIREMENTS:
+- Run with race detector: go test -race ./...
+- Stress test spinner with concurrent operations
+- Stress test query executor with rapid cancellations
+- Stress test cache with concurrent reads/writes
+
+================================================================================
+BUSINESS IMPACT
+================================================================================
+
+If these issues are not addressed:
+
+TECHNICAL RISKS:
+- Application crashes in production (panics)
+- Memory leaks from goroutine accumulation
+- Degraded performance under load
+- Cache corruption affecting query results
+- Hanging operations preventing graceful shutdown
+
+USER IMPACT:
+- Unexpected crashes during normal operation
+- UI glitches from race conditions in spinner
+- Slow performance over extended usage
+- Lost queries due to cache corruption
+
+OPERATIONAL RISKS:
+- Increased customer support burden
+- Potential data loss
+- Resource exhaustion in high-load scenarios
+- Difficulty debugging failures
+
+================================================================================
+RECOMMENDED TIMELINE
+================================================================================
+
+SPRINT 1 (IMMEDIATE - Days 1-3):
+- Fix Issues #1, #2 (critical)
+- Create comprehensive tests for these fixes
+- Internal testing and validation
+
+SPRINT 2 (URGENT - Days 4-10):
+- Fix Issues #3-6, #8 (high priority)
+- Add concurrency tests for all fixed components
+- Run full race detector sweep
+
+SPRINT 3 (STANDARD - Days 11-30):
+- Fix Issues #7, #9 (medium priority)
+- Documentation updates
+- Team knowledge sharing on concurrency patterns
+
+SPRINT 4+ (OPTIONAL):
+- Refactor Issue #10 (low priority)
+- Performance optimization
+- Additional hardening
+
+================================================================================
+TESTING STRATEGY
+================================================================================
+
+UNIT TESTS:
+- Test race conditions with concurrent operations
+- Test goroutine cleanup on context cancellation
+- Test channel protocol compliance
+
+INTEGRATION TESTS:
+- Multiple concurrent queries
+- Rapid start/stop operations
+- Network failures and timeouts
+
+STRESS TESTS:
+- High concurrency (100+ concurrent operations)
+- Sustained load for extended periods (hours)
+- Memory usage monitoring
+
+TOOLS:
+- Go race detector: go test -race ./...
+- pprof for profiling: go test -cpuprofile=cpu.prof ./...
+- Load testing tools (Apache Bench, hey, wrk)
+
+================================================================================
+RESOURCES PROVIDED
+================================================================================
+
+1. CONCURRENCY_ANALYSIS.md
+   - Detailed analysis of all 10 issues
+   - Code examples showing problems
+   - Impact assessment for each issue
+
+2. CONCURRENCY_FIXES.md
+   - Complete corrected code for all fixes
+   - Testing recommendations
+   - Deployment checklist
+
+3. CONCURRENCY_ISSUES_SUMMARY.txt
+   - Quick reference of all issues
+   - Action items checklist
+   - Testing checklist
+
+4. This document (EXECUTIVE_SUMMARY)
+   - Business impact analysis
+   - Timeline and priorities
+   - Resource allocation recommendations
+
+================================================================================
+CONCLUSION
+================================================================================
+
+The heyman project has significant concurrency issues that require immediate
+attention. The two critical issues (spinner race condition and query executor
+channel panic) pose direct risk to application stability and must be fixed
+before the next production release.
+
+The good news: All identified issues are fixable with straightforward
+application of Go concurrency best practices (mutexes, buffered channels,
+context awareness).
+
+Estimated total fix time: 20-30 engineering hours
+Recommended team size: 1-2 senior Go developers
+Risk of not fixing: Production crashes, memory leaks, data corruption
+
+Next steps:
+1. Schedule team review of this analysis
+2. Prioritize fixes into current sprint
+3. Assign ownership for each issue
+4. Plan comprehensive testing
+5. Execute fixes with code review
+6. Deploy and monitor in production
+
+================================================================================

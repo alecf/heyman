@@ -1,0 +1,293 @@
+╔════════════════════════════════════════════════════════════════════════════╗
+║                   HEYMAN CONCURRENCY ISSUES QUICK REFERENCE                ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ CRITICAL (2) - Fix immediately before next release                        │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌─ #1: Spinner Race Condition ──────────────────────────────────────────────┐
+│ File: internal/spinner/spinner.go                                         │
+│ Lines: 18, 38, 57-58, 70, 73                                              │
+│ Type: DATA RACE (Race Condition)                                          │
+│ Severity: ████████████ CRITICAL                                           │
+│                                                                             │
+│ Problem: The 'active' and 'message' fields are accessed from multiple      │
+│          goroutines without synchronization                               │
+│                                                                             │
+│ Impact: - Memory corruption                                               │
+│         - Undefined behavior                                              │
+│         - Application crashes                                             │
+│                                                                             │
+│ Fix: Add sync.RWMutex to protect all field accesses                       │
+│      Estimated effort: 1-2 hours                                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─ #2: Query Executor Channel Panic ────────────────────────────────────────┐
+│ File: internal/cli/query_executor.go                                      │
+│ Lines: 36, 46-48, 64-66, 70                                               │
+│ Type: CHANNEL PANIC (Send on Closed Channel)                             │
+│ Severity: ████████████ CRITICAL                                           │
+│                                                                             │
+│ Problem: Channels can be closed by provider while consumer still reading   │
+│          Early returns leave goroutines running with abandoned channels    │
+│                                                                             │
+│ Impact: - Runtime panic "send on closed channel"                          │
+│         - Goroutine leaks                                                 │
+│         - Memory leaks                                                    │
+│         - Application crashes                                             │
+│                                                                             │
+│ Fix: - Add defer for channel cleanup                                       │
+│      - Monitor context.Done() in select loop                             │
+│      - Drain remaining channels on error paths                           │
+│      Estimated effort: 1-2 hours                                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ HIGH (4) - Fix within 1 week                                              │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌─ #3: OpenAI Goroutine Leak ───────────────────────────────────────────────┐
+│ File: internal/llm/openai.go                                              │
+│ Lines: 65-122                                                              │
+│ Type: GOROUTINE LEAK                                                      │
+│ Severity: ██████████ HIGH                                                  │
+│                                                                             │
+│ Problem: Unbuffered chunkCh blocks when caller stops reading              │
+│          Goroutine remains running indefinitely                            │
+│                                                                             │
+│ Fix: - Use buffered channels (make(chan T, 10))                            │
+│      - Check context.Done() before sends                                  │
+│      Estimated effort: 1-2 hours                                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─ #4: Ollama Goroutine Leak ───────────────────────────────────────────────┐
+│ File: internal/llm/ollama.go                                              │
+│ Lines: 88-157                                                              │
+│ Type: GOROUTINE LEAK                                                      │
+│ Severity: ██████████ HIGH                                                  │
+│                                                                             │
+│ Problem: Same as #3 - unbuffered channels                                 │
+│                                                                             │
+│ Fix: Same as #3                                                            │
+│      Estimated effort: 1-2 hours                                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─ #5: OpenAI Double Close ─────────────────────────────────────────────────┐
+│ File: internal/llm/openai.go                                              │
+│ Lines: 104-105                                                             │
+│ Type: CHANNEL PANIC (Send on Closed Channel)                             │
+│ Severity: ██████████ HIGH                                                  │
+│                                                                             │
+│ Problem: errCh <- error, then defer close(errCh) closes already-sent-to   │
+│          channel                                                           │
+│                                                                             │
+│ Fix: Ensure error send happens before defer close                          │
+│      or use sync.Once                                                      │
+│      Estimated effort: 30 minutes                                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─ #6: Ollama Double Close ─────────────────────────────────────────────────┐
+│ File: internal/llm/ollama.go                                              │
+│ Lines: 150-152                                                             │
+│ Type: CHANNEL PANIC (Send on Closed Channel)                             │
+│ Severity: ██████████ HIGH                                                  │
+│                                                                             │
+│ Problem: Same as #5                                                        │
+│                                                                             │
+│ Fix: Same as #5                                                            │
+│      Estimated effort: 30 minutes                                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ MEDIUM (3) - Fix within 1 month                                           │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌─ #7: Cache Race Condition ────────────────────────────────────────────────┐
+│ File: internal/cache/cache.go                                             │
+│ Lines: 41-72                                                               │
+│ Type: MISSING SYNCHRONIZATION                                             │
+│ Severity: ████████ MEDIUM                                                  │
+│                                                                             │
+│ Problem: Get() and Set() can run concurrently on same file                │
+│          TOCTOU race between checking and reading files                    │
+│                                                                             │
+│ Impact: - Cache corruption                                                │
+│         - Lost metadata updates                                           │
+│         - Data integrity issues                                           │
+│                                                                             │
+│ Fix: Add sync.RWMutex to Cache struct                                      │
+│      Lock all file operations                                              │
+│      Estimated effort: 2-3 hours                                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─ #8: Spinner Double Close ────────────────────────────────────────────────┐
+│ File: internal/spinner/spinner.go                                         │
+│ Lines: 74, 91                                                              │
+│ Type: CHANNEL PANIC (Close of Closed Channel)                            │
+│ Severity: ████████ MEDIUM                                                  │
+│                                                                             │
+│ Problem: Both Stop() and StopWithMessage() close done channel              │
+│          Calling twice: first OK, second PANIC                            │
+│                                                                             │
+│ Fix: Use sync.Once to ensure close only once                              │
+│      Estimated effort: 30 minutes                                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─ #9: Missing Context Check ───────────────────────────────────────────────┐
+│ File: internal/cli/query_executor.go                                      │
+│ Lines: 42-68                                                               │
+│ Type: DEADLOCK POTENTIAL                                                  │
+│ Severity: ████████ MEDIUM                                                  │
+│                                                                             │
+│ Problem: Select loop doesn't monitor context.Done()                        │
+│          Can hang indefinitely if channels don't send                      │
+│                                                                             │
+│ Impact: - Application hangs                                               │
+│         - Prevents graceful shutdown                                      │
+│         - Resource exhaustion                                             │
+│                                                                             │
+│ Fix: Add case <-ctx.Done() to select statement                            │
+│      Estimated effort: 30 minutes                                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ LOW (1) - Refactoring opportunity                                         │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌─ #10: Global State (Viper) ───────────────────────────────────────────────┐
+│ File: internal/cli/root.go                                                │
+│ Lines: 68-75                                                               │
+│ Type: GLOBAL STATE                                                        │
+│ Severity: ███ LOW                                                          │
+│                                                                             │
+│ Problem: Viper global state, no synchronization                           │
+│          OK for now (single-threaded CLI)                                 │
+│          Issue if CLI becomes concurrent in future                        │
+│                                                                             │
+│ Fix: Refactor to pass config as parameter instead of using global         │
+│      Estimated effort: 4-6 hours                                          │
+│      Timeline: Next major version refactoring                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+╔════════════════════════════════════════════════════════════════════════════╗
+║                            SEVERITY BREAKDOWN                              ║
+╠════════════════════════════════════════════════════════════════════════════╣
+║                                                                             ║
+║  CRITICAL (2) ███████████████████████ 20% - Fix immediately               ║
+║  HIGH (4)     ██████████████████████████████████████ 40% - Urgent         ║
+║  MEDIUM (3)   ██████████████████████████ 30% - Important                  ║
+║  LOW (1)      ███ 10% - Refactoring                                       ║
+║                                                                             ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│                         TOTAL EFFORT ESTIMATE                              │
+├────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  CRITICAL issues:     2 hours                                              │
+│  HIGH issues:         8 hours                                              │
+│  MEDIUM issues:       4 hours                                              │
+│  Testing & Validation: 8 hours                                             │
+│                                                                             │
+│  TOTAL:             20-30 hours (2.5-4 days for 1 senior developer)       │
+│                                                                             │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│                        FIX PRIORITY SCHEDULE                               │
+├────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│ DAY 1: [ ] #1 (Spinner mutex)      [████ 2 hours]  CRITICAL              │
+│        [ ] #2 (Query executor)     [████ 2 hours]  CRITICAL              │
+│                                                                             │
+│ DAY 2: [ ] #3 (OpenAI buffer)      [██ 1-2 hours] HIGH                   │
+│        [ ] #4 (Ollama buffer)      [██ 1-2 hours] HIGH                   │
+│        [ ] #5 (OpenAI close)       [█ 30 min]     HIGH                   │
+│        [ ] #6 (Ollama close)       [█ 30 min]     HIGH                   │
+│                                                                             │
+│ DAY 3: [ ] #8 (Spinner close)      [█ 30 min]     MEDIUM                 │
+│        [ ] #7 (Cache mutex)        [███ 2-3 hours] MEDIUM                │
+│        [ ] #9 (Context check)      [█ 30 min]     MEDIUM                 │
+│                                                                             │
+│ DAY 4-5: [ ] Testing & Validation  [████████ 8 hours]                    │
+│          [ ] Code Review           [██ 2 hours]                           │
+│          [ ] Deploy & Monitor      [██ 2 hours]                           │
+│                                                                             │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│                          FILES AFFECTED SUMMARY                            │
+├────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│ internal/spinner/spinner.go     3 issues (#1, #8, indirectly #2)          │
+│ internal/cli/query_executor.go  2 issues (#2, #9)                         │
+│ internal/llm/openai.go          2 issues (#3, #5)                         │
+│ internal/llm/ollama.go          2 issues (#4, #6)                         │
+│ internal/cache/cache.go         1 issue (#7)                              │
+│ internal/cli/root.go            1 issue (#10)                             │
+│                                                                             │
+└────────────────────────────────────────────────────────────────────────────┘
+
+╔════════════════════════════════════════════════════════════════════════════╗
+║                        DOCUMENTATION PROVIDED                              ║
+╠════════════════════════════════════════════════════════════════════════════╣
+║                                                                             ║
+║ 1. CONCURRENCY_ANALYSIS.md                                                ║
+║    - Detailed analysis of each issue                                       ║
+║    - Code examples and impact assessment                                   ║
+║    - 200+ lines of detailed documentation                                  ║
+║                                                                             ║
+║ 2. CONCURRENCY_FIXES.md                                                   ║
+║    - Complete corrected code for all fixes                                 ║
+║    - Step-by-step code samples                                             ║
+║    - Testing recommendations and examples                                  ║
+║                                                                             ║
+║ 3. CONCURRENCY_ISSUES_SUMMARY.txt (this file)                             ║
+║    - Quick reference of all issues                                         ║
+║    - Action items checklist                                                ║
+║    - Testing checklist                                                     ║
+║                                                                             ║
+║ 4. CONCURRENCY_REVIEW_EXECUTIVE_SUMMARY.txt                               ║
+║    - Business impact analysis                                              ║
+║    - Timeline and priorities                                               ║
+║    - Technical recommendations                                             ║
+║                                                                             ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│                          QUICK ACTION CHECKLIST                            │
+├────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│ BEFORE STARTING FIXES:                                                     │
+│  [ ] Read CONCURRENCY_ANALYSIS.md for detailed understanding              │
+│  [ ] Review CONCURRENCY_FIXES.md for code samples                         │
+│  [ ] Schedule team review of findings                                      │
+│  [ ] Create tickets for each issue (or sprint)                            │
+│                                                                             │
+│ DURING FIXES:                                                              │
+│  [ ] Create branch for each issue or group                                │
+│  [ ] Reference this ticket in commit messages                              │
+│  [ ] Test with race detector: go test -race ./...                         │
+│  [ ] Create unit tests for concurrent scenarios                            │
+│                                                                             │
+│ AFTER FIXES:                                                               │
+│  [ ] Code review with focus on concurrency                                │
+│  [ ] Run full test suite                                                   │
+│  [ ] Run race detector on all tests                                        │
+│  [ ] Stress test with high concurrency                                     │
+│  [ ] Merge to main/master branch                                           │
+│  [ ] Deploy to staging environment                                         │
+│  [ ] Monitor production for any issues                                     │
+│                                                                             │
+└────────────────────────────────────────────────────────────────────────────┘
+
+IMPORTANT: These are concurrency issues that require careful attention.
+Even small mistakes in synchronization can lead to subtle bugs that are
+difficult to reproduce. Use the provided code samples and take time to
+understand the fixes thoroughly before deploying.
+
+For questions or clarifications, refer to:
+- Go Concurrency Patterns: https://go.dev/blog/pipelines
+- Go Memory Model: https://go.dev/ref/mem
+- Race Detector: https://go.dev/doc/articles/race_detector

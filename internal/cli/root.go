@@ -150,6 +150,12 @@ func run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Debug output for LLM response
+	if debug {
+		fmt.Fprintf(os.Stderr, "\n=== DEBUG: LLM Response ===\n%s\n", resp.Content)
+		fmt.Fprintf(os.Stderr, "\n=== DEBUG: Tokens (input: %d, output: %d) ===\n\n", resp.TokensInput, resp.TokensOutput)
+	}
+
 	// Parse and validate response (with retry)
 	parsed, err := parseAndValidate(cmd, providerConfig.Provider, promptBuilder, resp, command, explainFlag, cfg, activeProfile, question)
 	if err != nil {
