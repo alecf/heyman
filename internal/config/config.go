@@ -1,13 +1,15 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/adrg/xdg"
 	"github.com/pelletier/go-toml/v2"
-	"github.com/spf13/viper"
 )
 
 // Config represents the entire heyman configuration
@@ -19,54 +21,79 @@ type Config struct {
 
 // Profile represents an LLM provider configuration
 type Profile struct {
-	Name          string         `toml:"-"` // Set from map key
-	Provider      string         `toml:"provider"` // "openai", "anthropic", "ollama"
-	Model         string         `toml:"model"`
-	ContextWindow int            `toml:"context_window,omitempty"` // Max context window in tokens (defaults to 8192)
+	Name     string `toml:"-"`        // Set from map key
+	Provider string `toml:"provider"` // see llm.Providers()
+	Model    string `toml:"model"`
+	// BaseURL overrides the provider endpoint (required for openai-compat,
+	// optional for ollama and proxies).
+	BaseURL string `toml:"base_url,omitempty"`
+	// ContextWindow is deprecated and ignored; kept so old configs still load.
+	ContextWindow int            `toml:"context_window,omitempty"`
 	Options       map[string]any `toml:"options,omitempty"`
 }
 
-// Load reads the configuration from the config file and environment variables
+// Spec returns the profile's "provider/model" string.
+func (p *Profile) Spec() string {
+	return p.Provider + "/" + p.Model
+}
+
+// Validate reports whether the profile names a provider and a model.
+func (p *Profile) Validate() error {
+	if p.Provider == "" || p.Model == "" {
+		return fmt.Errorf("profile %q needs both provider and model (have provider=%q model=%q)", p.Name, p.Provider, p.Model)
+	}
+	return nil
+}
+
+// Load reads the configuration file. A missing file is not an error: the
+// defaults are returned. HEYMAN_PROFILE is not applied here (see
+// ActiveProfile) so that Save never writes an environment override back to
+// the file.
 func Load() (*Config, error) {
-	// Set config defaults
 	cfg := &Config{
 		CacheDays: 30,
 		Profiles:  make(map[string]Profile),
 	}
 
-	// Get config file path
-	configPath := getConfigPath()
-
-	// Check if config file exists
-	if _, err := os.Stat(configPath); err == nil {
-		// Config file exists, read it
-		data, err := os.ReadFile(configPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read config file: %w", err)
+	configPath := Path()
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return cfg, nil
 		}
-
-		if err := toml.Unmarshal(data, cfg); err != nil {
-			return nil, fmt.Errorf("failed to parse config file: %w", err)
-		}
-
-		// Set profile names from map keys
-		for name, profile := range cfg.Profiles {
-			profile.Name = name
-			cfg.Profiles[name] = profile
-		}
+		return nil, fmt.Errorf("reading %s: %w", configPath, err)
 	}
-
-	// Override with environment variables if set
-	if profile := os.Getenv("HEYMAN_PROFILE"); profile != "" {
-		cfg.DefaultProfile = profile
+	if err := toml.Unmarshal(data, cfg); err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", configPath, err)
 	}
-
+	if cfg.Profiles == nil {
+		cfg.Profiles = make(map[string]Profile)
+	}
+	// Set profile names from map keys
+	for name, profile := range cfg.Profiles {
+		profile.Name = name
+		cfg.Profiles[name] = profile
+	}
 	return cfg, nil
 }
 
-// Save writes the configuration to the config file
+// ActiveProfile returns the profile to use when none is given on the command
+// line: HEYMAN_PROFILE if set, else default_profile. source describes where
+// the name came from, for error messages. name is "" if neither is set.
+func (c *Config) ActiveProfile() (name, source string) {
+	if p := os.Getenv("HEYMAN_PROFILE"); p != "" {
+		return p, "HEYMAN_PROFILE"
+	}
+	if c.DefaultProfile != "" {
+		return c.DefaultProfile, "default_profile in " + Path()
+	}
+	return "", ""
+}
+
+// Save writes the configuration to the config file atomically (temp file +
+// rename) with 0600 permissions.
 func Save(cfg *Config) error {
-	configPath := getConfigPath()
+	configPath := Path()
 
 	// Ensure config directory exists (0700 for security)
 	configDir := filepath.Dir(configPath)
@@ -74,40 +101,31 @@ func Save(cfg *Config) error {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	// Marshal to TOML
 	data, err := toml.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	// Write to file (0600 for security - contains API keys via env)
-	if err := os.WriteFile(configPath, data, 0600); err != nil {
+	tmp, err := os.CreateTemp(configDir, ".config.toml.*.tmp")
+	if err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
-
+	defer os.Remove(tmp.Name()) // no-op after a successful rename
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+	if err := tmp.Chmod(0600); err != nil {
+		tmp.Close()
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+	if err := os.Rename(tmp.Name(), configPath); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
 	return nil
-}
-
-// GetActiveProfile returns the active profile based on flags, env vars, and config
-func (c *Config) GetActiveProfile() (*Profile, error) {
-	var profileName string
-
-	// Priority: CLI flag > env var > config default
-	if viper.IsSet("profile") {
-		profileName = viper.GetString("profile")
-	} else if c.DefaultProfile != "" {
-		profileName = c.DefaultProfile
-	} else {
-		return nil, fmt.Errorf("no profile specified and no default profile set")
-	}
-
-	profile, ok := c.Profiles[profileName]
-	if !ok {
-		return nil, fmt.Errorf("profile %q not found", profileName)
-	}
-
-	profile.Name = profileName
-	return &profile, nil
 }
 
 // AddProfile adds or updates a profile
@@ -119,50 +137,67 @@ func (c *Config) AddProfile(name string, profile Profile) {
 	c.Profiles[name] = profile
 }
 
-// GetContextWindow returns the context window for a profile, defaulting to 8192
-func (p *Profile) GetContextWindow() int {
-	if p.ContextWindow > 0 {
-		return p.ContextWindow
+// DeleteProfile removes a profile and handles default reassignment
+// Returns the new default profile name if changed, empty string if unchanged
+func (c *Config) DeleteProfile(name string) (newDefault string, err error) {
+	if _, ok := c.Profiles[name]; !ok {
+		return "", fmt.Errorf("profile %q not found", name)
 	}
-	return 8192 // Default context window
-}
 
-// GetAPIKey returns the API key for the given provider
-// Checks environment variables first, then profile options
-func (c *Config) GetAPIKey(provider string) string {
-	// Check provider-specific environment variables
-	switch provider {
-	case "openai":
-		if key := os.Getenv("OPENAI_API_KEY"); key != "" {
-			return key
+	delete(c.Profiles, name)
+
+	// Handle default reassignment if we deleted the default
+	if c.DefaultProfile == name {
+		if len(c.Profiles) == 0 {
+			c.DefaultProfile = ""
+			return "", nil
 		}
-	case "anthropic":
-		if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
-			return key
-		}
+		// Pick first alphabetically for predictability
+		c.DefaultProfile = c.SortedProfileNames()[0]
+		return c.DefaultProfile, nil
 	}
 
-	// Ollama doesn't need API key
-	return ""
+	return "", nil
 }
 
-// GetOllamaHost returns the Ollama host URL
-func GetOllamaHost() string {
-	if host := os.Getenv("OLLAMA_HOST"); host != "" {
-		return host
+// SetDefault sets the default profile
+func (c *Config) SetDefault(name string) error {
+	if _, ok := c.Profiles[name]; !ok {
+		return fmt.Errorf("profile %q not found", name)
 	}
-	return "http://localhost:11434"
+	c.DefaultProfile = name
+	return nil
 }
 
-// getConfigPath returns the path to the config file
-func getConfigPath() string {
-	configPath, err := xdg.ConfigFile("heyman/config.toml")
-	if err != nil {
-		// Fallback to home directory
-		home, _ := os.UserHomeDir()
-		return filepath.Join(home, ".config", "heyman", "config.toml")
+// ProfileExists checks if a profile name already exists
+func (c *Config) ProfileExists(name string) bool {
+	_, ok := c.Profiles[name]
+	return ok
+}
+
+// SortedProfileNames returns profile names in alphabetical order
+func (c *Config) SortedProfileNames() []string {
+	names := make([]string, 0, len(c.Profiles))
+	for name := range c.Profiles {
+		names = append(names, name)
 	}
-	return configPath
+	sort.Strings(names)
+	return names
+}
+
+// Path returns the config file path: $HEYMAN_CONFIG if set, else
+// <XDG config home>/heyman/config.toml (~/Library/Application Support on
+// macOS). Unlike xdg.ConfigFile it does not create any directories.
+func Path() string {
+	if p := os.Getenv("HEYMAN_CONFIG"); p != "" {
+		return p
+	}
+	const rel = "heyman/config.toml"
+	if xdg.ConfigHome != "" {
+		return filepath.Join(xdg.ConfigHome, rel)
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", rel)
 }
 
 // GetCacheDir returns the cache directory path
@@ -171,11 +206,9 @@ func GetCacheDir() string {
 		return cacheDir
 	}
 
-	cacheDir, err := xdg.CacheFile("heyman")
-	if err != nil {
-		// Fallback to home directory
-		home, _ := os.UserHomeDir()
-		return filepath.Join(home, ".cache", "heyman")
+	if xdg.CacheHome != "" {
+		return filepath.Join(xdg.CacheHome, "heyman")
 	}
-	return cacheDir
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".cache", "heyman")
 }

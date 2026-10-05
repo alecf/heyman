@@ -1,0 +1,150 @@
+================================================================================
+HEYMAN PROJECT - CONCURRENCY AND GOROUTINE ISSUES SUMMARY
+================================================================================
+
+TOTAL ISSUES FOUND: 10
+- CRITICAL: 2
+- HIGH: 4
+- MEDIUM: 3
+- LOW: 1
+
+================================================================================
+CRITICAL ISSUES
+================================================================================
+
+1. RACE CONDITION: Spinner active flag and message field
+   File: internal/spinner/spinner.go
+   Lines: 18, 38, 57-58, 70, 73
+   Problem: Unsynchronized access to 'active' and 'message' fields from multiple goroutines
+   Risk: Memory corruption, undefined behavior, crashes
+   Fix: Add sync.RWMutex to Spinner struct
+
+2. CHANNEL PANIC: Sending on closed channel in query executor
+   File: internal/cli/query_executor.go
+   Lines: 36, 46-48, 64-66, 70
+   Problem: Channels closed by provider while consumer still processing
+   Risk: Runtime panic "send on closed channel", goroutine leaks
+   Fix: Ensure channels fully drained on error paths, use context cancellation
+
+================================================================================
+HIGH SEVERITY ISSUES
+================================================================================
+
+3. GOROUTINE LEAK: OpenAI StreamQuery
+   File: internal/llm/openai.go
+   Lines: 65-122
+   Problem: Unbuffered channels block indefinitely if caller stops reading
+   Risk: Goroutines accumulate, memory leaks, resource exhaustion
+   Fix: Buffer channels (10+ capacity), check context.Done() before sends
+
+4. GOROUTINE LEAK: Ollama StreamQuery
+   File: internal/llm/ollama.go
+   Lines: 88-157
+   Problem: Same as issue #3
+   Risk: Same as issue #3
+   Fix: Same as issue #3
+
+5. CHANNEL DOUBLE CLOSE: OpenAI provider
+   File: internal/llm/openai.go
+   Lines: 104-105
+   Problem: errCh sent to after defer close, potential panic on error
+   Risk: Runtime panic, unpredictable channel behavior
+   Fix: Use sync.Once for close, or send before defer
+
+6. CHANNEL DOUBLE CLOSE: Ollama provider
+   File: internal/llm/ollama.go
+   Lines: 150-152
+   Problem: Same as issue #5
+   Risk: Same as issue #5
+   Fix: Same as issue #5
+
+================================================================================
+MEDIUM SEVERITY ISSUES
+================================================================================
+
+7. RACE CONDITION: Cache concurrent access
+   File: internal/cache/cache.go
+   Lines: 41-72
+   Problem: Multiple goroutines can read/write cache files simultaneously
+   Risk: Cache corruption, lost metadata updates, TOCTOU race
+   Fix: Add sync.RWMutex to Cache struct
+
+8. CHANNEL PANIC: Double close of spinner done channel
+   File: internal/spinner/spinner.go
+   Lines: 74, 91
+   Problem: Stop() and StopWithMessage() both close done channel
+   Risk: Runtime panic "close of closed channel"
+   Fix: Use sync.Once for channel close
+
+9. DEADLOCK POTENTIAL: Query executor doesn't monitor context
+   File: internal/cli/query_executor.go
+   Lines: 42-68
+   Problem: Select loop doesn't check ctx.Done(), can hang indefinitely
+   Risk: Application hangs, timeout, resource exhaustion
+   Fix: Add case <-ctx.Done() to select statement
+
+================================================================================
+LOW SEVERITY ISSUES
+================================================================================
+
+10. GLOBAL STATE: Viper configuration access
+    File: internal/cli/root.go
+    Lines: 68-75
+    Problem: Global state without explicit synchronization
+    Risk: Low in current single-threaded usage, issues if made concurrent
+    Fix: Reduce reliance on global configuration
+
+================================================================================
+QUICK ACTION ITEMS
+================================================================================
+
+IMMEDIATE (fix before next release):
+[ ] Issue #1: Add mutex to Spinner
+[ ] Issue #2: Fix query executor channel handling
+
+URGENT (within 1 week):
+[ ] Issue #3: Buffer OpenAI channels and add context checks
+[ ] Issue #4: Buffer Ollama channels and add context checks
+[ ] Issue #5: Fix OpenAI channel close ordering
+[ ] Issue #6: Fix Ollama channel close ordering
+[ ] Issue #8: Use sync.Once for spinner close
+
+HIGH PRIORITY (within 1 month):
+[ ] Issue #7: Add mutex to Cache
+[ ] Issue #9: Add context monitoring to query executor
+
+LOW PRIORITY (refactoring):
+[ ] Issue #10: Eliminate global Viper state
+
+================================================================================
+TESTING CHECKLIST
+================================================================================
+
+Run race detector:
+  go test -race ./...
+
+Stress test spinner:
+  - Concurrent Start/Stop operations
+  - Rapid Update calls during animation
+  - Multiple spinner instances
+
+Stress test query executor:
+  - Cancel context mid-stream
+  - Early returns on error
+  - Multiple concurrent queries
+
+Stress test cache:
+  - Concurrent Get/Set operations
+  - File system races with cleanup
+
+================================================================================
+DETAILED ANALYSIS
+================================================================================
+
+See CONCURRENCY_ANALYSIS.md for:
+- Detailed code examples for each issue
+- Impact analysis
+- Recommended fixes with code samples
+- Best practices for Go concurrency
+
+================================================================================

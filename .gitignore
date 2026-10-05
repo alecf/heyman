@@ -1,0 +1,19 @@
+# Build output
+/bin/
+/dist/
+/heyman
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Local Claude Code settings
+.claude/settings.local.json
+
+# Eval run outputs
+/evals/results/
+
+# Local secrets
+.env
+.env.*

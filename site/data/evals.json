@@ -1,0 +1,2401 @@
+{
+ "generated": "2026-10-05",
+ "runs": [
+  {
+   "dir": "full-20261005",
+   "os": "macOS 26.6.2 (darwin/arm64, BSD userland)",
+   "models": [
+    "anthropic/claude-haiku-4-5",
+    "anthropic/claude-sonnet-5-5",
+    "ollama/ministral-3:3b"
+   ],
+   "git_head": "97fb49a",
+   "completed": 146,
+   "planned": 150,
+   "interrupted": true,
+   "judge": "anthropic/claude-sonnet-5-5"
+  },
+  {
+   "dir": "claude-code-subset-20261005",
+   "os": "macOS 26.6.2 (darwin/arm64, BSD userland)",
+   "models": [
+    "claude-code/haiku"
+   ],
+   "git_head": "97fb49a",
+   "completed": 8,
+   "planned": 8,
+   "interrupted": false,
+   "judge": "anthropic/claude-sonnet-5-5"
+  }
+ ],
+ "models": [
+  {
+   "model": "anthropic/claude-haiku-4-5",
+   "pass": 47,
+   "n": 50,
+   "by_difficulty": {
+    "easy": [
+     15,
+     15
+    ],
+    "hard": [
+     12,
+     15
+    ],
+    "medium": [
+     20,
+     20
+    ]
+   },
+   "by_tag": {
+    "archives": [
+     3,
+     3
+    ],
+    "awk": [
+     2,
+     2
+    ],
+    "bsd-gnu": [
+     10,
+     11
+    ],
+    "chmod": [
+     1,
+     1
+    ],
+    "clipboard": [
+     1,
+     1
+    ],
+    "curl": [
+     2,
+     2
+    ],
+    "date": [
+     2,
+     2
+    ],
+    "dates": [
+     4,
+     4
+    ],
+    "defaults": [
+     1,
+     1
+    ],
+    "dig": [
+     1,
+     1
+    ],
+    "disk": [
+     0,
+     1
+    ],
+    "dns": [
+     1,
+     1
+    ],
+    "du": [
+     2,
+     3
+    ],
+    "files": [
+     11,
+     12
+    ],
+    "find": [
+     8,
+     8
+    ],
+    "git": [
+     7,
+     8
+    ],
+    "grep": [
+     2,
+     2
+    ],
+    "gzip": [
+     0,
+     1
+    ],
+    "hashing": [
+     1,
+     1
+    ],
+    "head": [
+     1,
+     1
+    ],
+    "jq": [
+     1,
+     1
+    ],
+    "json": [
+     1,
+     1
+    ],
+    "kill": [
+     2,
+     2
+    ],
+    "lsof": [
+     3,
+     3
+    ],
+    "macos-only": [
+     3,
+     3
+    ],
+    "multi-tool": [
+     12,
+     15
+    ],
+    "nc": [
+     1,
+     1
+    ],
+    "needs-jq": [
+     1,
+     1
+    ],
+    "network": [
+     8,
+     8
+    ],
+    "permissions": [
+     1,
+     1
+    ],
+    "processes": [
+     4,
+     4
+    ],
+    "ps": [
+     1,
+     1
+    ],
+    "rsync": [
+     1,
+     1
+    ],
+    "sed": [
+     3,
+     3
+    ],
+    "sort": [
+     3,
+     4
+    ],
+    "spotlight": [
+     1,
+     1
+    ],
+    "ssh": [
+     1,
+     1
+    ],
+    "stat": [
+     3,
+     3
+    ],
+    "tail": [
+     1,
+     1
+    ],
+    "tar": [
+     2,
+     2
+    ],
+    "text": [
+     8,
+     8
+    ],
+    "top": [
+     1,
+     1
+    ],
+    "tr": [
+     1,
+     1
+    ],
+    "uniq": [
+     2,
+     2
+    ],
+    "wc": [
+     3,
+     3
+    ],
+    "xargs": [
+     4,
+     5
+    ],
+    "zip": [
+     1,
+     1
+    ]
+   },
+   "by_form": {
+    "--": [
+     19,
+     20
+    ],
+    "command": [
+     28,
+     30
+    ]
+   },
+   "errors": 0,
+   "latency_p50_s": 3.114,
+   "latency_p95_s": 13.11,
+   "avg_tool_calls": 1.54,
+   "read_extra_man_pct": 38,
+   "cost_known": true,
+   "cost_per_case_usd": 0.01667688,
+   "exec_pass": 21,
+   "exec_ran": 22,
+   "judge_correct": 45,
+   "judged": 50,
+   "results": {
+    "awk-sum-column": {
+     "command": "awk -F, '{sum += $3} END {print sum}' data.csv",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command sets the field separator to a comma, adds up the third field on every line, and prints the total at the end. It is equivalent to the reference answers and works with macOS's BSD awk."
+    },
+    "chmod-dirs-and-files": {
+     "command": "find public/ -type d -exec chmod 755 {} + \u0026\u0026 find public/ -type f -exec chmod 644 {} +",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "Same as the reference except for the trailing slash on `public/`, which is harmless in BSD find. It sets all directories (including public itself) to 755 and all regular files to 644, using `-exec ... {} +`, which is supported on macOS."
+    },
+    "count-python-lines": {
+     "command": "find . -name \"*.py\" -print0 | xargs -0 wc -l | tail -1 | awk '{print $1}'",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "This is essentially the same as the third reference answer. `wc -l` prints a total line (or the single file's count), `tail -1` takes it, and `awk` extracts the number. It would only be wrong if xargs split the input into several batches, which is very unlikely for a normal project."
+    },
+    "curl-headers-only": {
+     "command": "curl -I https://example.com",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "`curl -I` sends a HEAD request and prints only the response headers. It works on macOS's curl and is identical to the first reference answer."
+    },
+    "curl-post-json": {
+     "command": "curl -X POST http://localhost:3000/api/users -H \"Content-Type: application/json\" -d '{\"name\": \"test\"}'",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command sends a POST with Content-Type application/json and the body {\"name\": \"test\"} to the right URL. Only the argument order differs from the reference, which doesn't matter to curl, and all flags are valid on macOS curl."
+    },
+    "date-epoch-to-utc": {
+     "command": "date -u -r 1700000000 \"+%Y-%m-%d %H:%M:%S\"",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "On macOS BSD date, `-r` takes epoch seconds and `-u` prints in UTC. The format string yields `2023-11-14 22:13:20`, which matches the reference answers."
+    },
+    "date-yesterday": {
+     "command": "date -v-1d +%Y-%m-%d",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "On macOS's BSD date, `-v-1d` adjusts the date back by one day and `+%Y-%m-%d` formats it as YYYY-MM-DD, so this prints yesterday's date. It matches the reference answers."
+    },
+    "defaults-show-hidden-files": {
+     "command": "defaults write com.apple.finder AppleShowAllFiles -bool true \u0026\u0026 killall Finder",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command is identical to the first reference answer. It sets the Finder AppleShowAllFiles preference to true and restarts Finder so the change takes effect."
+    },
+    "dig-mx-short": {
+     "command": "dig gmail.com MX +short",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "`dig gmail.com MX +short` is valid on macOS's dig and prints only the MX record data, the same as the reference answer `dig gmail.com MX +short`."
+    },
+    "du-largest-subdirs": {
+     "command": "du -h -d 1 | sort -rh | head -5",
+     "pass": false,
+     "first_failure": "check any: [{regex: \\bdu\\s+(\\S+\\s+)*\\S*\\*}, {regex: \\bhead\\s+(-n\\s*)?-?6\\b}, {regex: NR\\s*(\u003c=?\\s*6|\u003e\\s*1|!=\\s*1)}, {regex: \\btail\\s+(-n\\s*)?\\+2\\b}, {regex: \\bgrep\\s+(\\S+\\s+)*-[a-zA-Z]*v}, {regex: -mindepth\\s+1}]",
+     "judge": "incorrect",
+     "judge_reason": "`du -h -d 1` also prints the current directory '.' with its grand total, which sorts first. `head -5` therefore returns '.' plus only 4 subdirectories instead of the 5 largest. The reference answers avoid this by using `*/` or `head -6`."
+    },
+    "find-large-files": {
+     "command": "find ~ -type f -size +100M",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command matches the reference answer exactly. On macOS BSD find, `-size +100M` is valid and means more than 100 mebibytes, and `-type f` limits results to regular files."
+    },
+    "find-newer-than-date": {
+     "command": "find . -type f -newermt \"2024-01-15\"",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command is the same as the first reference answer except for the double quotes around the date, which do not change how the shell passes it. `-newermt` is supported by BSD find on macOS and, with `-type f`, lists regular files modified after 2024-01-15."
+    },
+    "find-size-and-path": {
+     "command": "find . -type f -exec stat -f \"%z %N\" {} \\;",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "On macOS BSD stat, `-f \"%z %N\"` prints the size in bytes followed by the file name. With `find . -type f -exec ... \\;` it runs once per regular file and prints one line per file, the same output as the reference."
+    },
+    "find-total-bytes-spaces": {
+     "command": "find . -name \"*.log\" -ls | awk '{sum += $7} END {print sum}'",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "On macOS, `find -ls` prints inode, blocks, perms, links, owner, group, size, date and name, so `$7` is the byte size. Spaces in file names come after the size field and do not shift it. The only gaps are that it lacks `-type f`, so a directory or symlink named `*.log` would be counted, and it prints an empty line instead of 0 when nothing matches. Both are minor edge cases."
+    },
+    "git-blame-range": {
+     "command": "git blame -L 10,20 main.go",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "`git blame -L 10,20 main.go` shows the commit and author who last modified each line in 10-20 of main.go, matching the reference answer exactly."
+    },
+    "git-changed-last-week-sizes": {
+     "command": "git log --since=\"1 week ago\" --name-only --pretty=format: | sort -u | xargs -I {} ls -lh {} 2\u003e/dev/null | awk '{print $5, $9}'",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The pipeline lists unique files changed in the last week, and `xargs -I {} ls -lh` runs on each one (BSD xargs skips blank lines and the errors for deleted files are suppressed). On macOS `ls -l` puts the size in column 5 and the name in column 9, so awk prints a human-readable size and name. The only weakness is that filenames with spaces are truncated in the output, which is minor."
+    },
+    "git-count-commits": {
+     "command": "git rev-list --count HEAD",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "`git rev-list --count HEAD` prints only the number of commits reachable from HEAD on the current branch, and it works the same on macOS. It is identical to the first reference answer."
+    },
+    "git-deleted-file-contents": {
+     "command": "git show HEAD~$(git log --follow -p config/old.yml | grep -c 'commit'):config/old.yml",
+     "pass": false,
+     "first_failure": "check any: [{regex: (\\^|~1?)['\"]?:['\"]?(\\./)?config/old\\.yml}, {regex: \\bcat-file\\b}]",
+     "judge": "incorrect",
+     "judge_reason": "Counting lines containing 'commit' in the log output gives an arbitrary number that does not equal the distance from HEAD to the commit before deletion, so HEAD~N will usually point to the wrong commit and fail or show the wrong content."
+    },
+    "git-recent-branches": {
+     "command": "git branch --sort=-committerdate --format='%(refname:short) %(committerdate:relative)'",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The candidate is identical to the second reference answer. `git branch --sort=-committerdate` lists local branches newest first, and the format string prints each branch name with its relative commit date."
+    },
+    "git-show-file-at-revision": {
+     "command": "git show HEAD~3:package.json",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "`git show HEAD~3:package.json` prints package.json as it was at the commit 3 commits before HEAD. It is identical to the first reference answer and valid on macOS."
+    },
+    "git-stash-untracked": {
+     "command": "git stash push -u",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "`git stash push -u` stashes tracked changes and untracked files. It is equivalent to `git stash -u`, and the flag is valid in git on macOS."
+    },
+    "git-top-churn-files": {
+     "command": "git log --name-only --pretty=format: | grep -v '^$' | sort | uniq -c | sort -rn | head -3",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "Equivalent to the reference: lists filenames per commit, removes blank lines, counts with uniq -c, sorts descending, and takes the top 3. All flags are valid on macOS/BSD."
+    },
+    "grep-context-after": {
+     "command": "grep -A 2 \"panic:\" server.log",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "`grep -A 2 \"panic:\" server.log` prints each line matching \"panic:\" plus the 2 lines after it, and `-A` is supported by BSD grep on macOS. It is equivalent to the reference answers."
+    },
+    "grep-count-matches": {
+     "command": "grep -c ERROR app.log",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "`grep -c ERROR app.log` prints the number of lines in app.log that contain ERROR. `-c` is supported by BSD grep on macOS, and the command is identical to the first reference answer."
+    },
+    "jq-extract-names": {
+     "command": "jq -r '.items[].name' data.json",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command is identical to the first reference answer. `-r` prints raw strings without quotes, and `.items[].name` emits each item's name on its own line."
+    },
+    "largest-files-tree": {
+     "command": "find . -type f -exec du -h {} + | sort -hrk1 | head -10",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "This is essentially the first reference answer. macOS's BSD sort supports -h, -r and -k, so `-hrk1` is valid and sorts the `du -h` sizes largest first. `head -10` is also valid, so the pipeline shows the 10 largest files with human-readable sizes."
+    },
+    "lsof-https-process-names": {
+     "command": "lsof -i TCP:443 -sTCP:ESTABLISHED | awk 'NR\u003e1 {print $1}' | sort -u",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "`lsof -i TCP:443 -sTCP:ESTABLISHED` lists established TCP sockets on port 443, and `awk 'NR\u003e1 {print $1}' | sort -u` extracts the unique command names. Omitting `-n -P` only adds name resolution and doesn't change the process names. Like the first reference, it could also match a local port 443, but it matches the reference's behavior."
+    },
+    "lsof-kill-port": {
+     "command": "kill -9 $(lsof -ti:3000)",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "`lsof -ti:3000` prints the PIDs using port 3000 and `kill -9` terminates them. This matches the reference answers apart from using SIGKILL, which is valid on macOS and still kills the listener. Like two of the references, it is not restricted to LISTEN sockets, so it could also hit client connections to port 3000."
+    },
+    "lsof-port-listener": {
+     "command": "lsof -i :8080",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "`lsof -i :8080` is a known-good reference answer. It lists processes with network connections on port 8080, including the listener, and works on macOS."
+    },
+    "md5-just-hash": {
+     "command": "md5 -q release.zip",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "On macOS, `md5 -q release.zip` prints only the hex MD5 digest with no filename or label, which is exactly what was asked."
+    },
+    "mdfind-pdf": {
+     "command": "mdfind -name invoice kind:pdf",
+     "pass": true,
+     "judge": "incorrect",
+     "judge_reason": "With `-name`, mdfind takes only the next argument as the file-name query. The extra `kind:pdf` is not combined as a filter, so it is ignored or mishandled and the results are not reliably limited to PDFs. A correct form would pipe through `grep -i '\\.pdf$'` or use a kMDItem query."
+    },
+    "nc-port-check": {
+     "command": "nc -zv db.example.com 5432",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The candidate is identical to the first reference answer. On macOS's BSD nc, `-z` scans for a listening port without sending data and `-v` adds verbose output, so it checks whether port 5432 is open."
+    },
+    "pbcopy-pubkey": {
+     "command": "cat ~/.ssh/id_ed25519.pub | pbcopy",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command pipes the contents of ~/.ssh/id_ed25519.pub into pbcopy, which copies it to the macOS clipboard. It is identical to one of the reference answers."
+    },
+    "pkill-by-name": {
+     "command": "pkill node",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "`pkill node` is valid on macOS and sends SIGTERM to processes whose name matches 'node', and it appears in the reference answers. It also matches substrings such as 'nodemon', but the reference accepts it."
+    },
+    "print-line-range": {
+     "command": "sed -n '20,25p' server.log",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "`sed -n '20,25p' server.log` prints only lines 20 through 25 and works with BSD sed on macOS. It is identical to the first reference answer."
+    },
+    "ps-top-memory": {
+     "command": "ps aux | head -1 \u0026\u0026 ps aux | sort -k 4 -rn | head -10",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "On macOS `ps aux` column 4 is %MEM, so `sort -k 4 -rn | head -10` yields the top 10 memory-using processes. The extra `ps aux | head -1` just prints the header, and the non-numeric header line in the sorted output would sort to the bottom and not appear in the top 10."
+    },
+    "replace-in-js-files": {
+     "command": "find src/ -name \"*.js\" -exec sed -i '' 's/oldName/newName/g' {} +",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command uses BSD-compatible `sed -i ''` and `find src/ -name \"*.js\" -exec ... {} +` to replace all occurrences of oldName with newName in every .js file under src/. The missing `-type f` is harmless unless a directory is named *.js, in which case sed would only print an error for that directory."
+    },
+    "rsync-mirror-delete": {
+     "command": "rsync -av --delete build/ deploy@web1:/var/www/site",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The trailing slash on build/ syncs its contents, --delete removes remote files that no longer exist locally, and -a preserves attributes. The missing trailing slash on the destination doesn't matter, and the second reference answer omits it too."
+    },
+    "sed-inplace-replace": {
+     "command": "sed -i '' -e 's/foo/bar/g' config.txt",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "On macOS BSD sed, `-i ''` sets an empty backup suffix for in-place editing, and `-e 's/foo/bar/g'` applies a global replacement, so this does what was asked."
+    },
+    "ssh-local-tunnel": {
+     "command": "ssh -J bastion.example.com -L 5432:db.internal:5432 -N bastion.example.com",
+     "pass": true,
+     "judge": "incorrect",
+     "judge_reason": "The `-J bastion.example.com` option makes ssh hop through the bastion to reach the bastion again. This adds a pointless second connection that needs extra auth and can fail on hairpin or firewall rules. The correct form is just `ssh -N -L 5432:db.internal:5432 bastion.example.com`."
+    },
+    "stat-file-size": {
+     "command": "stat -f %z notes.txt",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "On macOS BSD stat, `-f %z` prints the file size in bytes, so this outputs only the size of notes.txt."
+    },
+    "stat-mtime-epoch": {
+     "command": "stat -f %m notes.txt",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "On macOS's BSD stat, `-f %m` prints the file's last modification time as seconds since the epoch, which is what was asked. It matches one of the reference answers."
+    },
+    "tar-extract-to-dir": {
+     "command": "tar -xzf release.tar.gz -C /opt/app",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command is identical to the first reference answer. It extracts the gzip-compressed archive into /opt/app, and the flags are valid for macOS's bsdtar."
+    },
+    "tar-list-contents": {
+     "command": "tar -tzf archive.tar.gz",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "`tar -tzf archive.tar.gz` lists the contents of a gzip-compressed tar archive without extracting it. The flags are valid in macOS's bsdtar, and the command matches the first reference answer."
+    },
+    "top-ips-access-log": {
+     "command": "cut -d' ' -f1 access.log | sort | uniq -c | sort -rn | head -3",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The pipeline extracts the first space-delimited field, counts unique values, sorts numerically in descending order, and shows the top 3. It uses only flags that exist in BSD cut, sort, uniq, and head, and it is equivalent to the reference answer."
+    },
+    "top-snapshot-cpu": {
+     "command": "top -l 1 -o cpu",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The candidate is identical to the first reference answer. On macOS, `top -l 1` prints a single non-interactive sample, and `-o cpu` sorts the processes by CPU usage."
+    },
+    "tr-lowercase": {
+     "command": "tr '[:upper:]' '[:lower:]' \u003c NAMES.txt",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command matches the first reference answer exactly. It uses the POSIX character classes, which work with BSD tr on macOS, and prints NAMES.txt converted to lowercase."
+    },
+    "xargs-filelist-spaces": {
+     "command": "cat filelist.txt | while read file; do wc -l \"$file\"; done | awk '{sum += $1} END {print sum}'",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The loop reads each path line by line and quotes \"$file\", so spaces inside paths are preserved. `wc -l` prints the count first, so awk sums `$1` into a single total. Without `IFS= read -r`, leading/trailing whitespace and backslashes in paths would be mishandled, but that is a rare edge case and does not affect the stated case of spaces within paths."
+    },
+    "xargs-parallel-gzip": {
+     "command": "find . -maxdepth 1 -name \"*.log\" -print0 | xargs -0 -P4 gzip",
+     "pass": false,
+     "first_failure": "check any: [{regex: -n\\s*['\"]?\\d}, {regex: -L\\s*\\d}, {regex: -I\\s*\\S}, {regex: --max-args}, {regex: --max-lines}]",
+     "judge": "incorrect",
+     "judge_reason": "Without `-n 1` (or a similar limit), BSD xargs packs all filenames into one gzip invocation. `-P4` then has nothing to parallelize and gzip runs as a single process, not four in parallel."
+    },
+    "zip-recursive": {
+     "command": "zip -r docs.zip docs",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "`zip -r docs.zip docs` recursively adds the docs folder and all its contents to docs.zip, which is the same as the first reference answer and works with macOS's zip."
+    }
+   }
+  },
+  {
+   "model": "anthropic/claude-sonnet-5-5",
+   "pass": 49,
+   "n": 50,
+   "by_difficulty": {
+    "easy": [
+     15,
+     15
+    ],
+    "hard": [
+     14,
+     15
+    ],
+    "medium": [
+     20,
+     20
+    ]
+   },
+   "by_tag": {
+    "archives": [
+     3,
+     3
+    ],
+    "awk": [
+     2,
+     2
+    ],
+    "bsd-gnu": [
+     10,
+     11
+    ],
+    "chmod": [
+     1,
+     1
+    ],
+    "clipboard": [
+     1,
+     1
+    ],
+    "curl": [
+     2,
+     2
+    ],
+    "date": [
+     2,
+     2
+    ],
+    "dates": [
+     4,
+     4
+    ],
+    "defaults": [
+     1,
+     1
+    ],
+    "dig": [
+     1,
+     1
+    ],
+    "disk": [
+     0,
+     1
+    ],
+    "dns": [
+     1,
+     1
+    ],
+    "du": [
+     2,
+     3
+    ],
+    "files": [
+     12,
+     12
+    ],
+    "find": [
+     8,
+     8
+    ],
+    "git": [
+     8,
+     8
+    ],
+    "grep": [
+     2,
+     2
+    ],
+    "gzip": [
+     1,
+     1
+    ],
+    "hashing": [
+     1,
+     1
+    ],
+    "head": [
+     1,
+     1
+    ],
+    "jq": [
+     1,
+     1
+    ],
+    "json": [
+     1,
+     1
+    ],
+    "kill": [
+     2,
+     2
+    ],
+    "lsof": [
+     3,
+     3
+    ],
+    "macos-only": [
+     3,
+     3
+    ],
+    "multi-tool": [
+     14,
+     15
+    ],
+    "nc": [
+     1,
+     1
+    ],
+    "needs-jq": [
+     1,
+     1
+    ],
+    "network": [
+     8,
+     8
+    ],
+    "permissions": [
+     1,
+     1
+    ],
+    "processes": [
+     4,
+     4
+    ],
+    "ps": [
+     1,
+     1
+    ],
+    "rsync": [
+     1,
+     1
+    ],
+    "sed": [
+     3,
+     3
+    ],
+    "sort": [
+     3,
+     4
+    ],
+    "spotlight": [
+     1,
+     1
+    ],
+    "ssh": [
+     1,
+     1
+    ],
+    "stat": [
+     3,
+     3
+    ],
+    "tail": [
+     1,
+     1
+    ],
+    "tar": [
+     2,
+     2
+    ],
+    "text": [
+     8,
+     8
+    ],
+    "top": [
+     1,
+     1
+    ],
+    "tr": [
+     1,
+     1
+    ],
+    "uniq": [
+     2,
+     2
+    ],
+    "wc": [
+     3,
+     3
+    ],
+    "xargs": [
+     5,
+     5
+    ],
+    "zip": [
+     1,
+     1
+    ]
+   },
+   "by_form": {
+    "--": [
+     20,
+     20
+    ],
+    "command": [
+     29,
+     30
+    ]
+   },
+   "errors": 0,
+   "latency_p50_s": 2.758,
+   "latency_p95_s": 6.092,
+   "avg_tool_calls": 0.08,
+   "read_extra_man_pct": 6,
+   "cost_known": true,
+   "cost_per_case_usd": 0.01652044,
+   "exec_pass": 22,
+   "exec_ran": 22,
+   "judge_correct": 50,
+   "judged": 50,
+   "results": {
+    "awk-sum-column": {
+     "command": "awk -F, '{ s += $3 } END { print s }' data.csv",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command sets the field separator to a comma, adds the third field of every line to s, and prints the total at the end. It is functionally identical to the reference answer and works with BSD awk on macOS."
+    },
+    "chmod-dirs-and-files": {
+     "command": "find public -type d -exec chmod 755 {} + \u0026\u0026 find public -type f -exec chmod 644 {} +",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command is identical to the first reference answer. It sets every directory under public/ to 755 and every regular file to 644, using find with -exec ... {} +, which works on macOS BSD find."
+    },
+    "count-python-lines": {
+     "command": "find . -type f -name '*.py' -exec cat {} + | wc -l | tr -d ' '",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "find ... -exec cat {} + | wc -l counts total lines across all .py files, and tr -d ' ' just strips macOS wc's padding, leaving only the number."
+    },
+    "curl-headers-only": {
+     "command": "curl -s -D - -o /dev/null https://example.com",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command uses -D - to dump response headers to stdout and -o /dev/null to discard the body, with -s to silence progress. This matches one of the reference answers and works with macOS curl."
+    },
+    "curl-post-json": {
+     "command": "curl -X POST -H \"Content-Type: application/json\" -d '{\"name\": \"test\"}' http://localhost:3000/api/users",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command sends a POST with a JSON Content-Type header and the exact body {\"name\": \"test\"} to the requested URL. It is functionally identical to the first reference answer and uses only flags that macOS curl supports."
+    },
+    "date-epoch-to-utc": {
+     "command": "date -u -r 1700000000 '+%Y-%m-%d %H:%M:%S'",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "On macOS BSD date, `-r` takes epoch seconds and `-u` outputs UTC, so this prints 2023-11-14 22:13:20 in the requested format. It matches a reference answer."
+    },
+    "date-yesterday": {
+     "command": "date -v-1d +%Y-%m-%d",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "On macOS's BSD date, `-v-1d` adjusts the date back one day and `+%Y-%m-%d` formats it as YYYY-MM-DD, so the command prints yesterday's date. It matches the reference answers."
+    },
+    "defaults-show-hidden-files": {
+     "command": "defaults write com.apple.finder AppleShowAllFiles -bool true \u0026\u0026 killall Finder",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command is identical to the first reference answer. It sets Finder's AppleShowAllFiles preference to true and restarts Finder so the change takes effect, and both `defaults` and `killall` work on macOS."
+    },
+    "dig-mx-short": {
+     "command": "dig +short MX gmail.com",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command is identical to the first reference answer. `dig +short MX gmail.com` is valid on macOS and prints only the MX records."
+    },
+    "du-largest-subdirs": {
+     "command": "du -hd 1 | sort -rh | sed 1d | head -5",
+     "pass": false,
+     "first_failure": "check any: [{regex: \\bdu\\s+(\\S+\\s+)*\\S*\\*}, {regex: \\bhead\\s+(-n\\s*)?-?6\\b}, {regex: NR\\s*(\u003c=?\\s*6|\u003e\\s*1|!=\\s*1)}, {regex: \\btail\\s+(-n\\s*)?\\+2\\b}, {regex: \\bgrep\\s+(\\S+\\s+)*-[a-zA-Z]*v}, {regex: -mindepth\\s+1}]",
+     "judge": "correct",
+     "judge_reason": "`du -hd 1` is valid on macOS and lists the current directory plus its immediate subdirectories. `sort -rh` orders them largest first, `sed 1d` drops the `.` total (always the largest), and `head -5` leaves the 5 largest subdirectories."
+    },
+    "find-large-files": {
+     "command": "find ~ -type f -size +100M -exec ls -lh {} +",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "This is the reference command plus `-exec ls -lh {} +`. macOS BSD find supports the `M` suffix for `-size` and the `-exec ... {} +` form. The extra step only prints a long listing with human-readable sizes for each matching file, which still answers the request."
+    },
+    "find-newer-than-date": {
+     "command": "find . -type f -newermt 2024-01-15",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command matches the first reference answer exactly. macOS BSD find supports -newermt, so it lists regular files modified after 2024-01-15 00:00:00."
+    },
+    "find-size-and-path": {
+     "command": "find . -type f -exec stat -f '%z %N' {} +",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command is identical to the known-good reference. On macOS, `stat -f '%z %N'` prints each file's size in bytes followed by its path, and `find . -type f -exec ... {} +` applies it to every regular file under the current directory, one per line."
+    },
+    "find-total-bytes-spaces": {
+     "command": "find . -type f -name '*.log' -exec stat -f %z {} + | awk '{s+=$1} END{print s+0}'",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The candidate uses BSD stat with -f %z, which prints the size in bytes for each file. The `-exec ... {} +` form handles file names with spaces. awk sums the sizes, and `s+0` makes it print 0 when no files match, which is fine.\n\nThe space between `-f` and `%z` is valid, since BSD stat accepts `-f format` as a separate argument. The result is a single number.\n\nOne edge case is symlinks named *.log: `-type f` excludes them, so they are skipped, as in the reference. The output format can differ for very large sums, because awk may print in scientific notation for numbers of 1e16 or more, which is irrelevant in practice. awk's default %.6g applies only to non-integer values, and integers print fully.\n\n\u003cbr\u003e\n\n{\"verdict\":\"correct\",\"reason\":\"Uses valid BSD stat (-f %z) via find -exec {} +, which is safe for spaces in file names, and awk sums the sizes into a single number (0 if none match).\"}"
+    },
+    "git-blame-range": {
+     "command": "git blame -L 10,20 main.go",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "`git blame -L 10,20 main.go` shows the last commit and author for each of lines 10 to 20 of main.go. It is identical to the first reference answer and uses valid git syntax on macOS."
+    },
+    "git-changed-last-week-sizes": {
+     "command": "cd \"$(git rev-parse --show-toplevel)\" \u0026\u0026 git log --since='1 week ago' --name-only --pretty=format: | sort -u | grep -v '^$' | while IFS= read -r f; do [ -f \"$f\" ] \u0026\u0026 stat -f '%z %N' \"$f\"; done",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "Lists files changed in the last week (deduplicated, run from repo root so paths resolve), skips deleted files, and prints each size in bytes using valid BSD `stat -f '%z %N'`."
+    },
+    "git-count-commits": {
+     "command": "git rev-list --count HEAD",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "`git rev-list --count HEAD` prints only the number of commits reachable from HEAD on the current branch, and it works on macOS."
+    },
+    "git-deleted-file-contents": {
+     "command": "git show \"$(git log --diff-filter=D --format=%H -n 1 -- config/old.yml)^:config/old.yml\"",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "It finds the latest commit that deleted config/old.yml and shows the file at that commit's parent (`\u003csha\u003e^:config/old.yml`), which prints the contents just before deletion. The flags are valid for git on macOS and the quoting is correct."
+    },
+    "git-recent-branches": {
+     "command": "git for-each-ref --sort=-committerdate --format='%(refname:short)  %(committerdate:relative)' refs/heads/",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command lists only local branches (refs/heads/), sorts by committer date descending, and prints each short branch name with its relative commit date. It is equivalent to the reference answer, differing only in the amount of whitespace between the two fields."
+    },
+    "git-show-file-at-revision": {
+     "command": "git show HEAD~3:package.json",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command is identical to the first reference answer. `git show HEAD~3:package.json` prints package.json as it was at the commit three commits before HEAD."
+    },
+    "git-stash-untracked": {
+     "command": "git stash push --include-untracked",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "`git stash push --include-untracked` stashes tracked changes and untracked files, which is exactly the request. It matches a reference answer and works the same on macOS."
+    },
+    "git-top-churn-files": {
+     "command": "git log --name-only --pretty=format: | grep -v '^$' | sort | uniq -c | sort -rn | head -3",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "It lists file names from every commit, drops blank lines, counts each name with uniq -c, sorts by count descending and shows the top 3. This matches the reference answers, and all flags are valid on macOS."
+    },
+    "grep-context-after": {
+     "command": "grep -A 2 'panic:' server.log",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "`grep -A 2 'panic:' server.log` prints each line matching \"panic:\" plus the 2 lines after it. `-A` is supported by BSD grep on macOS, and this command is identical to the first reference answer."
+    },
+    "grep-count-matches": {
+     "command": "grep -c ERROR app.log",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "`grep -c ERROR app.log` prints the number of lines in app.log that contain ERROR. `-c` is supported by BSD grep on macOS, and the command matches the first reference answer exactly."
+    },
+    "jq-extract-names": {
+     "command": "jq -r '.items[].name' data.json",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command is identical to the first reference answer. `-r` prints raw strings without quotes, and `.items[].name` outputs each item's name on its own line."
+    },
+    "largest-files-tree": {
+     "command": "find . -type f -exec du -h {} + 2\u003e/dev/null | sort -rh | head -n 10",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "This matches the first reference answer, with only 2\u003e/dev/null added to hide permission errors. On macOS, `du -h` works with multiple file arguments and `sort -rh` handles human-readable sizes. The result is the 10 largest files, biggest first."
+    },
+    "lsof-https-process-names": {
+     "command": "lsof -nP -iTCP -sTCP:ESTABLISHED | awk 'NR\u003e1 \u0026\u0026 $9 ~ /-\u003e.*:443$/ {print $1}' | sort -u",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "On macOS, lsof prints the connection in field 9 (NAME), e.g. `local-\u003eremote:443`, followed by `(ESTABLISHED)` as field 10. The awk regex `-\u003e.*:443$` therefore matches only connections whose remote port is 443, including IPv6 addresses. Printing field 1 and running `sort -u` gives the unique process names."
+    },
+    "lsof-kill-port": {
+     "command": "lsof -ti tcp:3000 -sTCP:LISTEN | xargs kill",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "`-sTCP:LISTEN` combines with `-i tcp:3000` to restrict matches to listening sockets, as in the third reference answer. `-t` outputs only PIDs, which are piped to `kill` through `xargs`. All flags are valid on macOS."
+    },
+    "lsof-port-listener": {
+     "command": "lsof -nP -iTCP:8080 -sTCP:LISTEN",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command is identical to the first reference answer. On macOS, `lsof -nP -iTCP:8080 -sTCP:LISTEN` is valid and lists the process listening on TCP port 8080."
+    },
+    "md5-just-hash": {
+     "command": "md5 -q release.zip",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "On macOS, `md5 -q release.zip` prints only the hex MD5 digest with no filename or label, which is exactly what was asked."
+    },
+    "mdfind-pdf": {
+     "command": "mdfind \"kMDItemFSName == '*invoice*'c \u0026\u0026 kMDItemContentType == 'com.adobe.pdf'\"",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "Valid Spotlight query: case-insensitive wildcard match on filename 'invoice' combined with content type com.adobe.pdf, which finds PDF files with invoice in the name."
+    },
+    "nc-port-check": {
+     "command": "nc -zv -w 5 db.example.com 5432",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "On macOS's BSD nc, -z scans without sending data, -v gives verbose output, and -w 5 sets a 5-second timeout. All three flags are valid, and the command matches the reference answers with only a harmless timeout added."
+    },
+    "pbcopy-pubkey": {
+     "command": "pbcopy \u003c ~/.ssh/id_ed25519.pub",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command redirects the contents of ~/.ssh/id_ed25519.pub into pbcopy, which places them on the macOS clipboard. It is identical to the first reference answer."
+    },
+    "pkill-by-name": {
+     "command": "pkill -x node",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "`pkill -x node` is supported by BSD pkill on macOS. It sends SIGTERM to every process whose name exactly matches 'node', which matches the request and the first reference answer."
+    },
+    "print-line-range": {
+     "command": "sed -n '20,25p' server.log",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "`sed -n '20,25p' server.log` prints only lines 20 through 25 and works with BSD sed on macOS. It is identical to the first reference answer."
+    },
+    "ps-top-memory": {
+     "command": "ps -A -m -o pid,%mem,rss,comm | head -n 11",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "On macOS's BSD ps, -A lists all processes, -m sorts by memory usage, and -o with pid,%mem,rss,comm is valid. head -n 11 keeps the header plus the top 10, matching the reference ps aux -m | head -n 11."
+    },
+    "replace-in-js-files": {
+     "command": "find src -type f -name '*.js' -exec sed -i '' 's/oldName/newName/g' {} +",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command is identical to the first reference answer. It uses the BSD-compatible `sed -i ''` form and replaces all occurrences of oldName in every .js file under src/, editing in place."
+    },
+    "rsync-mirror-delete": {
+     "command": "rsync -av --delete build/ deploy@web1:/var/www/site/",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command uses the trailing slash on build/ to sync its contents, -a preserves attributes, and --delete removes remote files that no longer exist locally. Omitting -z only skips compression, so the result is the same."
+    },
+    "sed-inplace-replace": {
+     "command": "sed -i '' 's/foo/bar/g' config.txt",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "On macOS BSD sed, `-i ''` edits in place without a backup, and `s/foo/bar/g` replaces every occurrence of foo with bar in config.txt. This is identical to the first reference answer."
+    },
+    "ssh-local-tunnel": {
+     "command": "ssh -N -L 5432:db.internal:5432 bastion.example.com",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command is identical to the first reference answer. `-L 5432:db.internal:5432` forwards local port 5432 to db.internal:5432 through bastion.example.com, and `-N` only skips running a remote command. All flags are valid in macOS's OpenSSH."
+    },
+    "stat-file-size": {
+     "command": "stat -f %z notes.txt",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "On macOS BSD stat, `-f %z` prints the file size in bytes, so this prints only the size of notes.txt; it matches a reference answer."
+    },
+    "stat-mtime-epoch": {
+     "command": "stat -f %m notes.txt",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "On macOS BSD stat, `-f %m` prints the file's modification time as seconds since the epoch, which is exactly what was requested. It matches one of the reference answers."
+    },
+    "tar-extract-to-dir": {
+     "command": "mkdir -p /opt/app \u0026\u0026 tar -xzf release.tar.gz -C /opt/app",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command extracts release.tar.gz into /opt/app using valid BSD tar flags (-xzf, -C). The added `mkdir -p /opt/app` is a harmless safeguard that creates the directory if it doesn't exist, which the reference commands would fail on."
+    },
+    "tar-list-contents": {
+     "command": "tar -tf archive.tar.gz",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "On macOS, bsdtar auto-detects gzip compression when reading, so `tar -tf archive.tar.gz` lists the contents without extracting. It matches one of the known-good reference answers."
+    },
+    "top-ips-access-log": {
+     "command": "awk '{print $1}' access.log | sort | uniq -c | sort -rn | head -3",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The pipeline extracts the first field, counts each unique value with uniq -c, sorts the counts numerically in descending order, and shows the top 3. It is essentially identical to the first reference answer, and `head -3` is valid on macOS."
+    },
+    "top-snapshot-cpu": {
+     "command": "top -l 2 -s 1 -o cpu -n 10 | awk '/^Processes:/{buf=\"\"} {buf=buf $0 \"\\n\"} END{printf \"%s\", buf}'",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "On macOS, `top -l 2 -s 1 -o cpu -n 10` is valid and sorts by CPU, and the awk keeps only the second sample, which has accurate CPU deltas. The result is a single non-interactive snapshot of the top 10 processes by CPU."
+    },
+    "tr-lowercase": {
+     "command": "tr '[:upper:]' '[:lower:]' \u003c NAMES.txt",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command is identical to the first reference answer. It reads NAMES.txt and prints it with uppercase characters converted to lowercase, and `tr` with POSIX character classes works on macOS."
+    },
+    "xargs-filelist-spaces": {
+     "command": "tr '\\n' '\\0' \u003c filelist.txt | xargs -0 cat | wc -l | tr -d ' '",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "This is the first reference pipeline (NUL-delimited xargs handles paths with spaces) with `tr -d ' '` added to strip macOS wc's padding, so it prints a bare line count."
+    },
+    "xargs-parallel-gzip": {
+     "command": "find . -maxdepth 1 -type f -name '*.log' -print0 | xargs -0 -n 1 -P 4 gzip",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command finds regular .log files in the current directory only, passes them NUL-delimited to xargs, and runs up to 4 parallel gzip processes with one file each. All flags (-maxdepth, -print0, -0, -n, -P) are valid on macOS BSD tools, and adding -type f is a harmless refinement."
+    },
+    "zip-recursive": {
+     "command": "zip -r docs.zip docs",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "`zip -r docs.zip docs` recursively adds the docs folder and all its contents to docs.zip. It is identical to the first reference answer and works with macOS's zip."
+    }
+   }
+  },
+  {
+   "model": "ollama/ministral-3:3b",
+   "pass": 13,
+   "n": 46,
+   "by_difficulty": {
+    "easy": [
+     8,
+     14
+    ],
+    "hard": [
+     1,
+     14
+    ],
+    "medium": [
+     4,
+     18
+    ]
+   },
+   "by_tag": {
+    "archives": [
+     2,
+     3
+    ],
+    "awk": [
+     0,
+     2
+    ],
+    "bsd-gnu": [
+     2,
+     11
+    ],
+    "chmod": [
+     0,
+     1
+    ],
+    "curl": [
+     2,
+     2
+    ],
+    "date": [
+     0,
+     2
+    ],
+    "dates": [
+     0,
+     4
+    ],
+    "dig": [
+     1,
+     1
+    ],
+    "disk": [
+     0,
+     1
+    ],
+    "dns": [
+     1,
+     1
+    ],
+    "du": [
+     0,
+     3
+    ],
+    "files": [
+     3,
+     11
+    ],
+    "find": [
+     1,
+     8
+    ],
+    "git": [
+     1,
+     7
+    ],
+    "grep": [
+     0,
+     2
+    ],
+    "gzip": [
+     1,
+     1
+    ],
+    "hashing": [
+     0,
+     1
+    ],
+    "head": [
+     1,
+     1
+    ],
+    "jq": [
+     0,
+     1
+    ],
+    "json": [
+     0,
+     1
+    ],
+    "kill": [
+     0,
+     2
+    ],
+    "lsof": [
+     1,
+     3
+    ],
+    "multi-tool": [
+     1,
+     14
+    ],
+    "nc": [
+     0,
+     1
+    ],
+    "needs-jq": [
+     0,
+     1
+    ],
+    "network": [
+     4,
+     8
+    ],
+    "permissions": [
+     0,
+     1
+    ],
+    "processes": [
+     0,
+     4
+    ],
+    "ps": [
+     0,
+     1
+    ],
+    "rsync": [
+     0,
+     1
+    ],
+    "sed": [
+     2,
+     3
+    ],
+    "sort": [
+     0,
+     4
+    ],
+    "ssh": [
+     0,
+     1
+    ],
+    "stat": [
+     1,
+     3
+    ],
+    "tail": [
+     1,
+     1
+    ],
+    "tar": [
+     2,
+     2
+    ],
+    "text": [
+     3,
+     8
+    ],
+    "top": [
+     0,
+     1
+    ],
+    "tr": [
+     1,
+     1
+    ],
+    "uniq": [
+     0,
+     2
+    ],
+    "wc": [
+     0,
+     3
+    ],
+    "xargs": [
+     1,
+     5
+    ],
+    "zip": [
+     0,
+     1
+    ]
+   },
+   "by_form": {
+    "--": [
+     3,
+     19
+    ],
+    "command": [
+     10,
+     27
+    ]
+   },
+   "errors": 4,
+   "latency_p50_s": 20.3,
+   "latency_p95_s": 143.783,
+   "avg_tool_calls": 1.5434782608695652,
+   "read_extra_man_pct": 36.95652173913044,
+   "cost_known": true,
+   "cost_per_case_usd": 0,
+   "exec_pass": 5,
+   "exec_ran": 18,
+   "judge_correct": 11,
+   "judged": 42,
+   "results": {
+    "awk-sum-column": {
+     "command": "awk -F , 'NR\u003e1 {sum+=$3} END {print sum}' data.csv",
+     "pass": false,
+     "first_failure": "exec: stdout differs from reference",
+     "judge": "incorrect",
+     "judge_reason": "The candidate uses NR\u003e1, which skips the first line, but the file has no header row. The first row's third column is left out of the sum, so the result is wrong."
+    },
+    "chmod-dirs-and-files": {
+     "command": "Find's `-newer` and the other options are fine on macOS.",
+     "pass": false,
+     "first_failure": "check program: find",
+     "judge": "incorrect",
+     "judge_reason": "The candidate is a prose statement rather than a command, and it does not set any directory or file modes under public/."
+    },
+    "count-python-lines": {
+     "command": "find . -type f -name '*.py' -execwc -l {} +",
+     "pass": false,
+     "first_failure": "check any: [{program: wc}, {program: awk}]",
+     "judge": "incorrect",
+     "judge_reason": "The command has a typo: `-execwc` is not a valid find primary (it should be `-exec wc`), so find fails with an error. Even with the typo fixed, `wc -l` over many files would print per-file counts plus a total, and large file lists could be split into several batches, each with its own total, so it would not print just one total."
+    },
+    "curl-headers-only": {
+     "command": "curl -sI https://example.com",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "`curl -sI https://example.com` sends a HEAD request and prints only the response headers, with -s suppressing the progress meter. It matches one of the reference answers and works with curl on macOS."
+    },
+    "curl-post-json": {
+     "command": "curl -X POST -H \"Content-Type: application/json\" -d '{\"name\": \"test\"}' http://localhost:3000/api/users",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command sends a POST with the Content-Type: application/json header and the exact JSON body to the requested URL. It is equivalent to the first reference answer, differing only in double quotes around the header."
+    },
+    "date-epoch-to-utc": {
+     "command": "date -u -r 1700000000 +%Y-%m-%d %H:%M:%S",
+     "pass": false,
+     "first_failure": "exec: candidate exited 1",
+     "judge": "incorrect",
+     "judge_reason": "The format string is unquoted, so the space splits it into two arguments (`+%Y-%m-%d` and `%H:%M:%S`). BSD date will reject the extra operand with a usage error or, at best, omit the time portion."
+    },
+    "date-yesterday": {
+     "command": "date -r \"$(date +%s -r 1day)\" +%Y-%m-%d",
+     "pass": false,
+     "first_failure": "platform:darwin regex: -v\\s*['\"]?-(1d|24H)\\b",
+     "judge": "incorrect",
+     "judge_reason": "On macOS, `date -r` takes epoch seconds or a filename, not a relative expression. `1day` is not a number, so it is treated as a filename and the inner `date` fails with 'No such file or directory'. The command never computes yesterday's date; `date -v-1d +%F` is the working form."
+    },
+    "dig-mx-short": {
+     "command": "dig +short -t MX gmail.com \u0026\u0026 printf '%s_%s\n' '$(uname -m)_$(hostname)'",
+     "pass": true,
+     "judge": "incorrect",
+     "judge_reason": "The `dig +short -t MX gmail.com` part is fine. But the added `\u0026\u0026 printf ...` prints extra junk, the literal text `$(uname -m)_$(hostname)_` because the single quotes stop expansion. The user asked for the MX records and nothing else."
+    },
+    "du-largest-subdirs": {
+     "command": "find . -maxdepth 1 -type d -printf \"%f\\t%S\\n\" | sort -hrk 1",
+     "pass": false,
+     "first_failure": "check program: du",
+     "judge": "incorrect",
+     "judge_reason": "`-printf` is a GNU find option and does not exist in macOS's BSD find, so the command errors out. Even with GNU find, it prints name and sparseness (%S), not size, and sorts by name, with no head to limit to 5 results."
+    },
+    "find-large-files": {
+     "command": "find ~ -type f -size +100M -print0 | xargs -0 du -1 | grep -v ^[0-9.]*[KMGT]",
+     "pass": true,
+     "judge": "incorrect",
+     "judge_reason": "The pipeline passes `-1` to macOS's BSD `du`, which has no such option, so it errors with an illegal-option message instead of listing files. The trailing `grep -v` filter is also unnecessary and unquoted. The reference `find ~ -type f -size +100M` already does the job."
+    },
+    "find-newer-than-date": {
+     "command": "find . -type f -atime +1635 -print",
+     "pass": false,
+     "first_failure": "check regex: -newermt\\s+['\"]?2024-01-15",
+     "judge": "incorrect",
+     "judge_reason": "The command filters on access time (-atime +1635), not modification time, and uses a hard-coded day count instead of the date 2024-01-15. It also selects files accessed more than 1635 days ago, which is the opposite direction from 'modified after'."
+    },
+    "find-size-and-path": {
+     "command": "man[ARGS]{\"page\": \"stat\"}",
+     "pass": false,
+     "first_failure": "check program: find",
+     "judge": "incorrect",
+     "judge_reason": "The candidate is not a shell command that lists files and sizes. It looks like a malformed `man` invocation for the stat page, which would not print the size and path of each regular file under the current directory."
+    },
+    "find-total-bytes-spaces": {
+     "pass": false,
+     "error": "timed out after 3m0s: context deadline exceeded",
+     "first_failure": "error: timed out after 3m0s: context deadline exceeded"
+    },
+    "git-blame-range": {
+     "command": "git blame main.go | sed -n '10,20p' | while IFS= read -r line; do echo \"$line\"; done | git-check-attr -l - 2\u003e/dev/null | cut -d= -f2 | head -n 1",
+     "pass": false,
+     "first_failure": "check regex: -L\\s*['\"]?10,(20|\\+11)\\b",
+     "judge": "incorrect",
+     "judge_reason": "The pipeline sends the blame output through `git-check-attr -l -`, which is not a valid way to use that tool, then discards the output with `cut` and `head -n 1`. It does not show who last changed lines 10-20; the correct command is `git blame -L 10,20 main.go`."
+    },
+    "git-changed-last-week-sizes": {
+     "pass": false,
+     "error": "model did not produce a command",
+     "first_failure": "error: model did not produce a command"
+    },
+    "git-count-commits": {
+     "command": "git rev-list --count HEAD",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "`git rev-list --count HEAD` prints only the number of commits reachable from HEAD, i.e. the commit count of the current branch. It is identical to the first reference answer and works on macOS."
+    },
+    "git-recent-branches": {
+     "command": "git for-each-ref --format='%(refname:short) %(committerdate:short)' refs/heads/ | sort -k2nr | cut -f1,2",
+     "pass": false,
+     "first_failure": "check regex: --sort=['\"]?-(committerdate|authordate|creatordate)",
+     "judge": "incorrect",
+     "judge_reason": "It shows an absolute date (committerdate:short) rather than how long ago the commit was made. `sort -k2nr` also compares the date numerically, so it only sees the year and doesn't reliably order newest first."
+    },
+    "git-show-file-at-revision": {
+     "command": "git show --format=json \u003ccommit-hash\u003e:.package.json | jq -r .",
+     "pass": false,
+     "first_failure": "check regex: (HEAD|@)?(~3|\\^\\^\\^|~~~)['\"]?:(\\./)?package\\.json",
+     "judge": "incorrect",
+     "judge_reason": "The command uses a placeholder \u003ccommit-hash\u003e instead of HEAD~3, and the path `.package.json` is wrong because it names a different file. The `--format=json` option is not valid and the jq pipe is unnecessary, so it would not print package.json from 3 commits ago."
+    },
+    "git-stash-untracked": {
+     "command": "git update-index --check \u0026\u0026 git stash save \"All unstaged changes + untracked files\" --keep-index",
+     "pass": false,
+     "first_failure": "check any: [{regex: \\s-[a-zA-Z]*u\\b}, {regex: --include-untracked}]",
+     "judge": "incorrect",
+     "judge_reason": "The command omits -u/--include-untracked, so untracked files are not stashed. It also adds --keep-index, which leaves staged changes in the working tree instead of stashing them. And `git update-index --check` is not a valid option, so the \u0026\u0026 chain would likely fail before stashing anything."
+    },
+    "git-top-churn-files": {
+     "pass": false,
+     "error": "model did not produce a command",
+     "first_failure": "error: model did not produce a command"
+    },
+    "grep-context-after": {
+     "command": "grep -B 2 \"panic:.*\" server.log",
+     "pass": false,
+     "first_failure": "check any: [{regex: -A\\s*['\"]?2\\b}, {regex: --after-context[= ]2\\b}]",
+     "judge": "incorrect",
+     "judge_reason": "-B 2 prints the 2 lines BEFORE each match, not the 2 lines after. The request needs -A 2, so the output shows the wrong context lines."
+    },
+    "grep-count-matches": {
+     "command": "grep -c \"ERROR\" \u003c(find . -name \"app.log\" -o -name \"*app.log\" | xargs -0)",
+     "pass": false,
+     "first_failure": "exec: candidate exited 1",
+     "judge": "incorrect",
+     "judge_reason": "The command never reads app.log's contents. `find ... | xargs -0` just echoes the file paths, and grep then counts lines in that path list that contain ERROR, which is almost certainly 0. It also searches more files than the one requested."
+    },
+    "jq-extract-names": {
+     "command": "jq -r '.items[]' data.json",
+     "pass": false,
+     "first_failure": "check regex: \\bname\\b",
+     "judge": "incorrect",
+     "judge_reason": "The candidate prints each whole item in `.items[]` rather than its `name` field. If the items are objects, the output is the full JSON objects, not the names. The reference answers all select `.name`."
+    },
+    "largest-files-tree": {
+     "command": "**find . -maxdepth 1 -type f -exec du -h {} + 2\u003e/dev/null | sort -h -r | head -n 10**",
+     "pass": false,
+     "first_failure": "check program: find",
+     "judge": "incorrect",
+     "judge_reason": "The -maxdepth 1 flag limits the search to the top-level directory only, so files in subdirectories are ignored, contradicting 'anywhere under the current directory'."
+    },
+    "lsof-https-process-names": {
+     "command": "netstat -anps TCP -c | grep ':443' | sort -u | sed 's/.*://'",
+     "pass": false,
+     "first_failure": "check regex: (?i)establ",
+     "judge": "incorrect",
+     "judge_reason": "The command cannot list process names. macOS netstat has no `-c` flag, and `-s` prints protocol statistics rather than connections. Even without those problems, netstat output carries no process names, and `sed 's/.*://'` would strip each line down to a port or state, not a name."
+    },
+    "lsof-kill-port": {
+     "command": "lsof -i TCP:3000",
+     "pass": false,
+     "first_failure": "check program: kill",
+     "judge": "incorrect",
+     "judge_reason": "`lsof -i TCP:3000` only lists processes using port 3000; it does not kill anything, so the request is not accomplished."
+    },
+    "lsof-port-listener": {
+     "command": "lsof -i :8080",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "`lsof -i :8080` lists processes with an internet socket on port 8080, including the listener, and it is identical to one of the known-good reference answers. It may also show clients connected to that port, but the listener is shown with its PID."
+    },
+    "md5-just-hash": {
+     "command": "/sbin/md5 \u003c(openssl dgst -binary -md5 release.zip)",
+     "pass": false,
+     "first_failure": "platform:darwin any: [{regex: \\bmd5\\s+(\\S+\\s+)*-[a-zA-Z]*q}, {regex: \\|\\s*(cut|awk|sed)\\b}, {regex: \\bmd5\\s+(\\S+\\s+)*-[a-zA-Z]*r.*\\|}]",
+     "judge": "incorrect",
+     "judge_reason": "The command computes the MD5 of the 16-byte binary MD5 digest, not of release.zip, so the hash is wrong. It also prints 'MD5 (/dev/fd/63) = ...' because it omits -q, so the output is not just the hex digest."
+    },
+    "nc-port-check": {
+     "pass": false,
+     "error": "model did not produce a command",
+     "first_failure": "error: model did not produce a command"
+    },
+    "pkill-by-name": {
+     "command": "kill -9 $(pgrep -x node)",
+     "pass": false,
+     "first_failure": "check any: [{program: pkill}, {program: killall}]",
+     "judge": "correct",
+     "judge_reason": "`pgrep -x node` lists the PIDs of processes named exactly `node`, and `kill -9` terminates them all. It uses SIGKILL rather than the default SIGTERM, which is more forceful but still does what was asked. Both `pgrep -x` and `kill` work on macOS."
+    },
+    "print-line-range": {
+     "command": "sed -n '20,25p' server.log",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "`sed -n '20,25p' server.log` prints only lines 20 through 25 and works with BSD sed on macOS. It is identical to the first reference answer."
+    },
+    "ps-top-memory": {
+     "command": "ps -A -o rss,vsz,pidsort=descending | head -n 11 | cut -c 1-10,18-",
+     "pass": false,
+     "first_failure": "platform:darwin any: [{regex: \\bps\\s+(\\S+\\s+)*-[a-zA-Z]*[mv](\\s|$)}, {regex: \\|\\s*sort\\b}]",
+     "judge": "incorrect",
+     "judge_reason": "`pidsort=descending` is not a valid `ps` keyword; macOS `ps` parses it as keyword `pidsort` and fails with 'keyword not found'. The command also has no memory sort (no `-m` or `sort`), and the `cut` is arbitrary, so it would not list the top 10 memory users."
+    },
+    "replace-in-js-files": {
+     "command": "sed -i '' -e 's|oldName|newName|g' src/*.js",
+     "pass": false,
+     "first_failure": "check any: [{program: find}, {program: grep}, {program: rg}, {program: fd}, {regex: \\*\\*/\\*\\.js}, {regex: git\\s+(grep|ls-files)}]",
+     "judge": "incorrect",
+     "judge_reason": "The glob src/*.js matches only .js files directly inside src/, not those in subdirectories, so it doesn't cover every .js file under src/ as requested."
+    },
+    "rsync-mirror-delete": {
+     "command": "rsync -avzrp --delete /build/ deploy@web1:/var/www/site \u0026\u0026 rm -rf deploy@web1:/var/www/site/.rsync-filename-temp \u0026\u0026 rsync --del deploy@web1:/var/www/site/",
+     "pass": false,
+     "first_failure": "check regex: (\\s|\\./|['\"])build/['\"]?\\s",
+     "judge": "incorrect",
+     "judge_reason": "The command uses /build/ (an absolute path at filesystem root) instead of the local relative build/, so it syncs the wrong directory or fails. It also appends a pointless local `rm -rf deploy@web1:...` that does not act remotely, and a final `rsync --del deploy@web1:/var/www/site/` with no source or valid arguments, which is erroneous."
+    },
+    "sed-inplace-replace": {
+     "command": "sed -i '' -e 's/foo/bar/g' config.txt",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "On macOS BSD sed, `-i ''` sets an empty backup suffix for in-place editing, and `-e 's/foo/bar/g'` supplies the script. The `g` flag replaces every occurrence on each line, so this matches the reference answer."
+    },
+    "ssh-local-tunnel": {
+     "command": "ssh -J bastion@example.com user@db.internal -p 5432",
+     "pass": false,
+     "first_failure": "check regex: bastion\\.example\\.com",
+     "judge": "incorrect",
+     "judge_reason": "The command uses -J (ProxyJump) to open an SSH session to db.internal on port 5432, not a local port forward. It also misreads the bastion as user 'bastion' at example.com. It never sets up a -L forward from local port 5432."
+    },
+    "stat-file-size": {
+     "command": "stat -f %z notes.txt",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "On macOS BSD stat, `-f %z` prints the file size in bytes, so this outputs only the size of notes.txt. It matches a reference answer."
+    },
+    "stat-mtime-epoch": {
+     "command": "stat -c '%m' notes.txt | tr -d '[:space:]'",
+     "pass": false,
+     "first_failure": "platform:darwin any: [{regex: -f\\s*['\"]?%m}, {regex: -t\\s*['\"]?%s['\"]?\\s+-f\\s*['\"]?%Sm}, {regex: -f\\s*['\"]?%Sm['\"]?\\s+-t\\s*['\"]?%s}, {regex: \\bdate\\s+(\\S+\\s+)*-r\\s*['\"]?notes\\.txt.*%s}]",
+     "judge": "incorrect",
+     "judge_reason": "On macOS's BSD stat, -c is not a valid option (GNU-only). The command would fail with an illegal option error instead of printing the timestamp. The BSD form is stat -f %m notes.txt."
+    },
+    "tar-extract-to-dir": {
+     "command": "tar -xzf release.tar.gz -C /opt/app",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command is identical to the first reference answer. `tar -xzf release.tar.gz -C /opt/app` is valid with macOS bsdtar and extracts the gzip archive into /opt/app."
+    },
+    "tar-list-contents": {
+     "command": "tar -tf archive.tar.gz",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "bsdtar on macOS auto-detects gzip compression when reading, so `tar -tf archive.tar.gz` lists the contents without extracting. It is also one of the reference answers."
+    },
+    "top-ips-access-log": {
+     "command": "- filter first field",
+     "pass": false,
+     "first_failure": "check regex: access\\.log",
+     "judge": "incorrect",
+     "judge_reason": "The candidate \"filter first field\" is plain text, not a shell command. It would not count IP addresses or show the top 3 with their counts."
+    },
+    "top-snapshot-cpu": {
+     "command": "top -S -d1 -c n -o +cpu | head -c 5 \u0026\u0026 echo 'Here is the top CPU-sorted snapshot, macOS, without logging'; top -n1 -o cpu;",
+     "pass": false,
+     "first_failure": "platform:darwin regex: -[a-zA-Z]*l\\s*[12]\\b",
+     "judge": "incorrect",
+     "judge_reason": "Neither top invocation uses `-l 1`, so top runs in interactive, continuously refreshing mode on macOS. The second call (`top -n1 -o cpu`) would not exit on its own, since `-n` only limits the number of processes shown. The first call is piped to `head -c 5` and prints a truncated fragment. The command is also a messy chain with an unrelated echo, and it never produces a single non-interactive snapshot."
+    },
+    "tr-lowercase": {
+     "command": "cat NAMES.txt | tr '[:upper:]' '[:lower:]'",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command pipes NAMES.txt through tr with POSIX character classes, which BSD tr on macOS supports. It prints the file in lowercase, the same as the reference answer apart from the harmless extra cat."
+    },
+    "xargs-filelist-spaces": {
+     "command": "grep -v '^$' filelist.txt | xargs -d ' ' cat - | wc -l",
+     "pass": false,
+     "first_failure": "check any: [{regex: \\bxargs\\s+(\\S+\\s+)*-[a-zA-Z]*0\\b}, {regex: --null}, {regex: \\bxargs\\s+(\\S+\\s+)*-d\\s*['\"]?\\\\n}, {regex: --delimiter}, {regex: \\bwhile\\b.*\\bread\\b}, {regex: -I\\s*\\S}, {regex: IFS=\\$'\\\\n'}]",
+     "judge": "incorrect",
+     "judge_reason": "BSD xargs on macOS does not support -d, so the command errors out. Even where -d works, splitting on spaces would break paths containing spaces, and `cat -` adds a stdin read."
+    },
+    "xargs-parallel-gzip": {
+     "command": "find . -maxdepth 1 -name \"*.log\" | xargs -P 4 -I '%' sh -c 'gzip -9 \"$%\"'",
+     "pass": true,
+     "judge": "incorrect",
+     "judge_reason": "With `-I '%'`, xargs substitutes the filename for `%` inside the script, so `\"$%\"` becomes `\"$./foo.log\"`. The shell does not expand `$.` as a variable, so gzip receives the literal path `$./foo.log`, which does not exist, and the files are never compressed."
+    },
+    "zip-recursive": {
+     "command": "zip docs.zip docs/",
+     "pass": false,
+     "first_failure": "check regex: \\s-[a-zA-Z]*r",
+     "judge": "incorrect",
+     "judge_reason": "Without the -r flag, zip only stores the empty directory entry 'docs/' and does not recurse into it, so the folder's contents are not included."
+    }
+   }
+  },
+  {
+   "model": "claude-code/haiku",
+   "pass": 7,
+   "n": 8,
+   "by_difficulty": {
+    "easy": [
+     1,
+     1
+    ],
+    "hard": [
+     2,
+     3
+    ],
+    "medium": [
+     4,
+     4
+    ]
+   },
+   "by_tag": {
+    "bsd-gnu": [
+     5,
+     5
+    ],
+    "date": [
+     1,
+     1
+    ],
+    "dates": [
+     1,
+     1
+    ],
+    "files": [
+     2,
+     3
+    ],
+    "find": [
+     1,
+     1
+    ],
+    "git": [
+     1,
+     1
+    ],
+    "gzip": [
+     0,
+     1
+    ],
+    "lsof": [
+     1,
+     1
+    ],
+    "multi-tool": [
+     1,
+     2
+    ],
+    "network": [
+     1,
+     1
+    ],
+    "processes": [
+     1,
+     1
+    ],
+    "ps": [
+     1,
+     1
+    ],
+    "sed": [
+     1,
+     1
+    ],
+    "stat": [
+     2,
+     2
+    ],
+    "text": [
+     1,
+     1
+    ],
+    "xargs": [
+     0,
+     1
+    ]
+   },
+   "by_form": {
+    "--": [
+     1,
+     1
+    ],
+    "command": [
+     6,
+     7
+    ]
+   },
+   "errors": 0,
+   "latency_p50_s": 11.932,
+   "latency_p95_s": 31.758,
+   "avg_tool_calls": 0,
+   "read_extra_man_pct": 0,
+   "cost_known": true,
+   "cost_per_case_usd": 0.026245000000000004,
+   "exec_pass": 3,
+   "exec_ran": 3,
+   "judge_correct": 7,
+   "judged": 8,
+   "results": {
+    "date-yesterday": {
+     "command": "date -v -1d +%Y-%m-%d",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "On macOS BSD date, `-v -1d` is parsed as option -v with argument `-1d` (getopt takes the next argv element), so it prints yesterday's date in YYYY-MM-DD format."
+    },
+    "find-size-and-path": {
+     "command": "find . -type f -exec stat -f \"%z %N\" {} \\;",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "On macOS BSD stat, `-f \"%z %N\"` prints the size in bytes and the file name. Using `-exec ... \\;` runs it once per file, which gives one line per regular file under `.`, the same output as the reference."
+    },
+    "git-recent-branches": {
+     "command": "git for-each-ref --sort=-committerdate --format='%(refname:short)  %(committerdate:relative)' refs/heads",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "The command lists only local branches (refs/heads), sorts by committer date descending, and prints each short branch name with its relative commit date. It matches the reference apart from the argument order and an extra space, and all the options are valid in git on macOS."
+    },
+    "lsof-port-listener": {
+     "command": "lsof -i :8080",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "`lsof -i :8080` is one of the reference answers and works on macOS. It lists processes with a connection on port 8080, including the listening one. It may also show non-listening connections, but it still identifies the listener."
+    },
+    "ps-top-memory": {
+     "command": "ps -Av | head -11",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "On macOS (BSD ps), -A lists all processes and -v selects the virtual-memory format, which implies -m (sort by memory usage). So `head -11` gives the header plus the top 10 memory users, which matches the reference `ps aux -m | head -n 11`."
+    },
+    "sed-inplace-replace": {
+     "command": "sed -i '' 's/foo/bar/g' config.txt",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "On macOS BSD sed, `-i ''` edits in place with no backup, and `s/foo/bar/g` replaces every occurrence. This matches the first reference answer exactly."
+    },
+    "stat-file-size": {
+     "command": "stat -f %z notes.txt",
+     "pass": true,
+     "judge": "correct",
+     "judge_reason": "On macOS BSD stat, `-f %z` prints the file size in bytes, so this prints only the size of notes.txt. It matches a reference answer."
+    },
+    "xargs-parallel-gzip": {
+     "command": "find . -maxdepth 1 -name \"*.log\" -print0 | xargs -0 -P 4 gzip",
+     "pass": false,
+     "first_failure": "check any: [{regex: -n\\s*['\"]?\\d}, {regex: -L\\s*\\d}, {regex: -I\\s*\\S}, {regex: --max-args}, {regex: --max-lines}]",
+     "judge": "incorrect",
+     "judge_reason": "Without `-n 1` (or `-n`/`-L`), BSD xargs packs all filenames into a single gzip invocation, so `-P 4` has nothing to parallelize. The files are gzipped sequentially by one process rather than 4 in parallel."
+    }
+   }
+  }
+ ],
+ "cases": [
+  {
+   "id": "lsof-port-listener",
+   "command": "lsof",
+   "question": "which process is listening on port 8080",
+   "difficulty": "easy",
+   "tags": [
+    "easy",
+    "lsof",
+    "network"
+   ],
+   "reference": "lsof -nP -iTCP:8080 -sTCP:LISTEN"
+  },
+  {
+   "id": "lsof-kill-port",
+   "command": "lsof",
+   "question": "kill the process that is listening on port 3000",
+   "difficulty": "hard",
+   "tags": [
+    "hard",
+    "kill",
+    "lsof",
+    "multi-tool",
+    "processes"
+   ],
+   "reference": "lsof -ti tcp:3000 | xargs kill"
+  },
+  {
+   "id": "pkill-by-name",
+   "command": "pkill",
+   "question": "kill all processes named node",
+   "difficulty": "easy",
+   "tags": [
+    "easy",
+    "kill",
+    "processes"
+   ],
+   "reference": "pkill -x node"
+  },
+  {
+   "id": "ps-top-memory",
+   "command": "ps",
+   "question": "show the 10 processes using the most memory",
+   "difficulty": "medium",
+   "tags": [
+    "bsd-gnu",
+    "medium",
+    "multi-tool",
+    "processes",
+    "ps"
+   ],
+   "reference": "ps aux -m | head -n 11"
+  },
+  {
+   "id": "top-snapshot-cpu",
+   "command": "top",
+   "question": "print a single non-interactive snapshot of the top processes sorted by CPU usage",
+   "difficulty": "medium",
+   "tags": [
+    "bsd-gnu",
+    "medium",
+    "processes",
+    "top"
+   ],
+   "reference": "top -l 1 -o cpu"
+  },
+  {
+   "id": "lsof-https-process-names",
+   "question": "list the unique names of processes that currently have established TCP connections to remote port 443",
+   "difficulty": "hard",
+   "tags": [
+    "hard",
+    "lsof",
+    "multi-tool",
+    "network"
+   ],
+   "reference": "lsof -nP -iTCP:443 -sTCP:ESTABLISHED | awk 'NR\u003e1 {print $1}' | sort -u"
+  },
+  {
+   "id": "xargs-parallel-gzip",
+   "command": "xargs",
+   "question": "gzip every .log file in the current directory, running 4 gzip processes in parallel",
+   "difficulty": "hard",
+   "tags": [
+    "files",
+    "gzip",
+    "hard",
+    "multi-tool",
+    "xargs"
+   ],
+   "reference": "find . -maxdepth 1 -name '*.log' -print0 | xargs -0 -n 1 -P 4 gzip"
+  },
+  {
+   "id": "find-large-files",
+   "command": "find",
+   "question": "find files larger than 100MB in my home directory",
+   "difficulty": "easy",
+   "tags": [
+    "easy",
+    "files",
+    "find"
+   ],
+   "reference": "find ~ -type f -size +100M"
+  },
+  {
+   "id": "find-newer-than-date",
+   "command": "find",
+   "question": "list the regular files under the current directory that were modified after 2024-01-15",
+   "difficulty": "medium",
+   "tags": [
+    "dates",
+    "files",
+    "find",
+    "medium"
+   ],
+   "reference": "find . -type f -newermt 2024-01-15"
+  },
+  {
+   "id": "find-size-and-path",
+   "question": "for every regular file under the current directory, print its size in bytes followed by its path, one file per line",
+   "difficulty": "hard",
+   "tags": [
+    "bsd-gnu",
+    "files",
+    "find",
+    "hard",
+    "stat"
+   ],
+   "reference": "find . -type f -exec wc -c {} \\;"
+  },
+  {
+   "id": "largest-files-tree",
+   "question": "show the 10 largest files anywhere under the current directory with human-readable sizes, biggest first",
+   "difficulty": "hard",
+   "tags": [
+    "du",
+    "files",
+    "find",
+    "hard",
+    "multi-tool",
+    "sort"
+   ],
+   "reference": "find . -type f -exec du -h {} + | sort -rh | head -n 10"
+  },
+  {
+   "id": "find-total-bytes-spaces",
+   "question": "print the total size in bytes of all .log files under the current directory, as a single number; some file names contain spaces",
+   "difficulty": "hard",
+   "tags": [
+    "files",
+    "find",
+    "hard",
+    "multi-tool",
+    "wc",
+    "xargs"
+   ],
+   "reference": "find . -type f -name '*.log' -print0 | xargs -0 cat | wc -c"
+  },
+  {
+   "id": "xargs-filelist-spaces",
+   "question": "print the total number of lines, as a single number, across all the files listed in filelist.txt (one path per line; some paths contain spaces)",
+   "difficulty": "hard",
+   "tags": [
+    "bsd-gnu",
+    "files",
+    "hard",
+    "multi-tool",
+    "wc",
+    "xargs"
+   ],
+   "reference": "tr '\\n' '\\0' \u003c filelist.txt | xargs -0 cat | wc -l"
+  },
+  {
+   "id": "count-python-lines",
+   "question": "print just the total number of lines across all .py files under the current directory, recursively",
+   "difficulty": "medium",
+   "tags": [
+    "files",
+    "find",
+    "medium",
+    "multi-tool",
+    "wc"
+   ],
+   "reference": "find . -type f -name '*.py' -exec cat {} + | wc -l"
+  },
+  {
+   "id": "grep-count-matches",
+   "command": "grep",
+   "question": "count how many lines in app.log contain ERROR",
+   "difficulty": "easy",
+   "tags": [
+    "easy",
+    "grep",
+    "text"
+   ],
+   "reference": "grep -c ERROR app.log"
+  },
+  {
+   "id": "grep-context-after",
+   "command": "grep",
+   "question": "show every line containing \"panic:\" in server.log plus the 2 lines that follow each match",
+   "difficulty": "medium",
+   "tags": [
+    "grep",
+    "medium",
+    "text"
+   ],
+   "reference": "grep -A 2 'panic:' server.log"
+  },
+  {
+   "id": "sed-inplace-replace",
+   "command": "sed",
+   "question": "replace every occurrence of foo with bar in config.txt, editing the file in place",
+   "difficulty": "medium",
+   "tags": [
+    "bsd-gnu",
+    "medium",
+    "sed",
+    "text"
+   ],
+   "reference": "sed -i '' 's/foo/bar/g' config.txt"
+  },
+  {
+   "id": "replace-in-js-files",
+   "question": "replace oldName with newName in every .js file under src/, editing the files in place",
+   "difficulty": "hard",
+   "tags": [
+    "bsd-gnu",
+    "find",
+    "hard",
+    "multi-tool",
+    "sed",
+    "text",
+    "xargs"
+   ],
+   "reference": "find src -type f -name '*.js' -exec sed -i '' 's/oldName/newName/g' {} +"
+  },
+  {
+   "id": "awk-sum-column",
+   "command": "awk",
+   "question": "print the sum of the third column of data.csv (comma-separated, no header row)",
+   "difficulty": "medium",
+   "tags": [
+    "awk",
+    "medium",
+    "text"
+   ],
+   "reference": "awk -F, '{s+=$3} END {print s}' data.csv"
+  },
+  {
+   "id": "top-ips-access-log",
+   "question": "show the 3 most frequent IP addresses in access.log (the IP is the first field of each line) with their counts, most frequent first",
+   "difficulty": "hard",
+   "tags": [
+    "awk",
+    "hard",
+    "multi-tool",
+    "sort",
+    "text",
+    "uniq"
+   ],
+   "reference": "awk '{print $1}' access.log | sort | uniq -c | sort -rn | head -n 3"
+  },
+  {
+   "id": "print-line-range",
+   "question": "print lines 20 through 25 of server.log",
+   "difficulty": "easy",
+   "tags": [
+    "easy",
+    "head",
+    "sed",
+    "tail",
+    "text"
+   ],
+   "reference": "sed -n '20,25p' server.log"
+  },
+  {
+   "id": "tr-lowercase",
+   "question": "print the contents of NAMES.txt converted to lowercase",
+   "difficulty": "easy",
+   "tags": [
+    "easy",
+    "text",
+    "tr"
+   ],
+   "reference": "tr '[:upper:]' '[:lower:]' \u003c NAMES.txt"
+  },
+  {
+   "id": "jq-extract-names",
+   "command": "jq",
+   "question": "print the name of every item in the items array of data.json, one per line, without quotes",
+   "difficulty": "medium",
+   "tags": [
+    "jq",
+    "json",
+    "medium",
+    "needs-jq"
+   ],
+   "reference": "jq -r '.items[].name' data.json"
+  },
+  {
+   "id": "stat-file-size",
+   "command": "stat",
+   "question": "print only the size in bytes of notes.txt",
+   "difficulty": "medium",
+   "tags": [
+    "bsd-gnu",
+    "files",
+    "medium",
+    "stat"
+   ],
+   "reference": "stat -c%s notes.txt 2\u003e/dev/null || stat -f%z notes.txt"
+  },
+  {
+   "id": "stat-mtime-epoch",
+   "question": "print the last-modified time of notes.txt as a unix timestamp (seconds since the epoch)",
+   "difficulty": "medium",
+   "tags": [
+    "bsd-gnu",
+    "dates",
+    "files",
+    "medium",
+    "stat"
+   ],
+   "reference": "date -r notes.txt +%s"
+  },
+  {
+   "id": "date-yesterday",
+   "command": "date",
+   "question": "print yesterday's date as YYYY-MM-DD",
+   "difficulty": "medium",
+   "tags": [
+    "bsd-gnu",
+    "date",
+    "dates",
+    "medium"
+   ],
+   "reference": "date -v-1d +%Y-%m-%d 2\u003e/dev/null || date -d yesterday +%Y-%m-%d"
+  },
+  {
+   "id": "date-epoch-to-utc",
+   "question": "convert the unix timestamp 1700000000 to a UTC date formatted as YYYY-MM-DD HH:MM:SS",
+   "difficulty": "medium",
+   "tags": [
+    "bsd-gnu",
+    "date",
+    "dates",
+    "medium"
+   ],
+   "reference": "date -u -r 1700000000 '+%Y-%m-%d %H:%M:%S' 2\u003e/dev/null || date -u -d @1700000000 '+%Y-%m-%d %H:%M:%S'"
+  },
+  {
+   "id": "md5-just-hash",
+   "question": "print only the MD5 hash of release.zip (just the hex digest, nothing else)",
+   "difficulty": "easy",
+   "tags": [
+    "easy",
+    "files",
+    "hashing"
+   ],
+   "reference": "md5 -q release.zip 2\u003e/dev/null || md5sum release.zip | cut -d' ' -f1"
+  },
+  {
+   "id": "du-largest-subdirs",
+   "command": "du",
+   "question": "show the 5 largest subdirectories of the current directory, human-readable, largest first",
+   "difficulty": "hard",
+   "tags": [
+    "bsd-gnu",
+    "disk",
+    "du",
+    "hard",
+    "multi-tool",
+    "sort"
+   ],
+   "reference": "du -sh */ | sort -rh | head -n 5"
+  },
+  {
+   "id": "chmod-dirs-and-files",
+   "question": "under public/, set every directory to mode 755 and every regular file to mode 644",
+   "difficulty": "hard",
+   "tags": [
+    "chmod",
+    "find",
+    "hard",
+    "multi-tool",
+    "permissions"
+   ],
+   "reference": "find public -type d -exec chmod 755 {} + \u0026\u0026 find public -type f -exec chmod 644 {} +"
+  },
+  {
+   "id": "zip-recursive",
+   "command": "zip",
+   "question": "create docs.zip containing the docs folder and everything in it",
+   "difficulty": "easy",
+   "tags": [
+    "archives",
+    "easy",
+    "zip"
+   ],
+   "reference": "zip -r docs.zip docs"
+  },
+  {
+   "id": "tar-list-contents",
+   "command": "tar",
+   "question": "list the files inside archive.tar.gz without extracting it",
+   "difficulty": "easy",
+   "tags": [
+    "archives",
+    "easy",
+    "tar"
+   ],
+   "reference": "tar -tzf archive.tar.gz"
+  },
+  {
+   "id": "tar-extract-to-dir",
+   "command": "tar",
+   "question": "extract release.tar.gz into the directory /opt/app",
+   "difficulty": "medium",
+   "tags": [
+    "archives",
+    "medium",
+    "tar"
+   ],
+   "reference": "tar -xzf release.tar.gz -C /opt/app"
+  },
+  {
+   "id": "curl-headers-only",
+   "command": "curl",
+   "question": "show only the HTTP response headers from https://example.com",
+   "difficulty": "easy",
+   "tags": [
+    "curl",
+    "easy",
+    "network"
+   ],
+   "reference": "curl -I https://example.com"
+  },
+  {
+   "id": "curl-post-json",
+   "command": "curl",
+   "question": "send a POST request with the JSON body {\"name\": \"test\"} to http://localhost:3000/api/users",
+   "difficulty": "medium",
+   "tags": [
+    "curl",
+    "medium",
+    "network"
+   ],
+   "reference": "curl -X POST -H 'Content-Type: application/json' -d '{\"name\": \"test\"}' http://localhost:3000/api/users"
+  },
+  {
+   "id": "rsync-mirror-delete",
+   "command": "rsync",
+   "question": "sync the contents of my local build/ directory to deploy@web1:/var/www/site, deleting remote files that no longer exist locally",
+   "difficulty": "medium",
+   "tags": [
+    "medium",
+    "network",
+    "rsync"
+   ],
+   "reference": "rsync -avz --delete build/ deploy@web1:/var/www/site/"
+  },
+  {
+   "id": "ssh-local-tunnel",
+   "command": "ssh",
+   "question": "forward my local port 5432 to port 5432 on db.internal through the bastion host bastion.example.com",
+   "difficulty": "medium",
+   "tags": [
+    "medium",
+    "network",
+    "ssh"
+   ],
+   "reference": "ssh -N -L 5432:db.internal:5432 bastion.example.com"
+  },
+  {
+   "id": "nc-port-check",
+   "question": "check whether port 5432 is open on db.example.com without sending any data",
+   "difficulty": "easy",
+   "tags": [
+    "easy",
+    "nc",
+    "network"
+   ],
+   "reference": "nc -zv db.example.com 5432"
+  },
+  {
+   "id": "dig-mx-short",
+   "command": "dig",
+   "question": "show just the MX records for gmail.com, nothing else",
+   "difficulty": "easy",
+   "tags": [
+    "dig",
+    "dns",
+    "easy",
+    "network"
+   ],
+   "reference": "dig +short MX gmail.com"
+  },
+  {
+   "id": "git-blame-range",
+   "command": "git",
+   "question": "show who last changed lines 10 to 20 of main.go",
+   "difficulty": "medium",
+   "tags": [
+    "git",
+    "medium"
+   ],
+   "reference": "git blame -L 10,20 main.go"
+  },
+  {
+   "id": "git-show-file-at-revision",
+   "command": "git",
+   "question": "print the contents of package.json as it was 3 commits ago",
+   "difficulty": "medium",
+   "tags": [
+    "git",
+    "medium"
+   ],
+   "reference": "git show HEAD~3:package.json"
+  },
+  {
+   "id": "git-recent-branches",
+   "command": "git",
+   "question": "list my local branches sorted by most recent commit, newest first, showing each branch name and how long ago it was last committed to",
+   "difficulty": "hard",
+   "tags": [
+    "git",
+    "hard"
+   ],
+   "reference": "git for-each-ref --sort=-committerdate refs/heads/ --format='%(refname:short) %(committerdate:relative)'"
+  },
+  {
+   "id": "git-count-commits",
+   "question": "how many commits are on the current git branch? print just the number",
+   "difficulty": "easy",
+   "tags": [
+    "easy",
+    "git"
+   ],
+   "reference": "git rev-list --count HEAD"
+  },
+  {
+   "id": "git-stash-untracked",
+   "question": "stash all my uncommitted changes in git, including untracked files",
+   "difficulty": "easy",
+   "tags": [
+    "easy",
+    "git"
+   ],
+   "reference": "git stash -u"
+  },
+  {
+   "id": "git-changed-last-week-sizes",
+   "question": "list the size of all files changed in git in the last week",
+   "difficulty": "hard",
+   "tags": [
+    "du",
+    "git",
+    "hard",
+    "multi-tool",
+    "xargs"
+   ],
+   "reference": "git log --since='1 week ago' --name-only --pretty=format: | sort -u | xargs du -h 2\u003e/dev/null"
+  },
+  {
+   "id": "git-top-churn-files",
+   "question": "show the 3 files that have been changed in the most commits in this git repo, with their commit counts, most changed first",
+   "difficulty": "hard",
+   "tags": [
+    "git",
+    "hard",
+    "multi-tool",
+    "sort",
+    "uniq"
+   ],
+   "reference": "git log --format= --name-only | grep -v '^$' | sort | uniq -c | sort -rn | head -n 3"
+  },
+  {
+   "id": "git-deleted-file-contents",
+   "question": "config/old.yml was deleted at some point in this git repo's history; print the contents it had just before it was deleted",
+   "difficulty": "hard",
+   "tags": [
+    "git",
+    "hard",
+    "multi-tool"
+   ],
+   "reference": "git show \"$(git rev-list -n 1 HEAD -- config/old.yml)^:config/old.yml\""
+  },
+  {
+   "id": "pbcopy-pubkey",
+   "command": "pbcopy",
+   "question": "copy my SSH public key ~/.ssh/id_ed25519.pub to the clipboard",
+   "difficulty": "easy",
+   "tags": [
+    "clipboard",
+    "easy",
+    "macos-only"
+   ],
+   "reference": "pbcopy \u003c ~/.ssh/id_ed25519.pub"
+  },
+  {
+   "id": "mdfind-pdf",
+   "command": "mdfind",
+   "question": "use Spotlight to find all PDF files whose name contains invoice",
+   "difficulty": "medium",
+   "tags": [
+    "files",
+    "macos-only",
+    "medium",
+    "spotlight"
+   ],
+   "reference": "mdfind -name invoice | grep -i '\\.pdf$'"
+  },
+  {
+   "id": "defaults-show-hidden-files",
+   "command": "defaults",
+   "question": "make Finder always show hidden files",
+   "difficulty": "medium",
+   "tags": [
+    "defaults",
+    "macos-only",
+    "medium"
+   ],
+   "reference": "defaults write com.apple.finder AppleShowAllFiles -bool true \u0026\u0026 killall Finder"
+  }
+ ]
+}

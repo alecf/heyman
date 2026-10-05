@@ -4,55 +4,51 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/alecf/heyman/internal/llm"
-	"github.com/alecf/heyman/internal/parser"
+	"github.com/alecf/heyman/internal/assist"
 )
 
 // JSONOutput represents the JSON output format
 type JSONOutput struct {
-	Command     string              `json:"command"`
-	Explanation string              `json:"explanation,omitempty"`
-	Metadata    *Metadata           `json:"metadata,omitempty"`
+	Command     string    `json:"command"`
+	Explanation string    `json:"explanation,omitempty"`
+	Metadata    *Metadata `json:"metadata,omitempty"`
 }
 
 // Metadata represents metadata about the query
 type Metadata struct {
-	Provider     string  `json:"provider"`
-	Model        string  `json:"model"`
-	TokensInput  int     `json:"tokens_input"`
-	TokensOutput int     `json:"tokens_output"`
-	Cached       bool    `json:"cached"`
-	Cost         *float64 `json:"cost,omitempty"` // nil for Ollama
+	Model        string   `json:"model"`
+	ManPages     []string `json:"man_pages,omitempty"`
+	Steps        int      `json:"steps"`
+	TokensInput  int64    `json:"tokens_input"`
+	TokensOutput int64    `json:"tokens_output"`
+	Cached       bool     `json:"cached"`
+	Cost         *float64 `json:"cost,omitempty"` // nil when unknown or free; 0 when cached
+	Notes        []string `json:"notes,omitempty"`
 }
 
 // FormatJSON formats the output as JSON
-func FormatJSON(parsed parser.ParsedResponse, resp *llm.QueryResponse, cost *float64) (string, error) {
-	output := JSONOutput{
-		Command:     parsed.Command,
-		Explanation: parsed.Explanation,
+func FormatJSON(res *assist.Result, explain bool, cost *float64) (string, error) {
+	out := JSONOutput{
+		Command: res.Command,
 		Metadata: &Metadata{
-			Provider:     resp.Provider,
-			Model:        resp.Model,
-			TokensInput:  resp.TokensInput,
-			TokensOutput: resp.TokensOutput,
-			Cached:       resp.Cached,
+			Model:        res.Model,
+			ManPages:     res.ManPages,
+			Steps:        res.Steps,
+			TokensInput:  res.Usage.InputTokens,
+			TokensOutput: res.Usage.OutputTokens,
+			Cached:       res.Cached,
 			Cost:         cost,
+			Notes:        res.Notes,
 		},
 	}
+	if explain {
+		out.Explanation = res.Explanation
+	}
 
-	data, err := json.MarshalIndent(output, "", "  ")
+	data, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal JSON: %w", err)
 	}
 
 	return string(data), nil
-}
-
-// FormatPlain formats the output as plain text
-func FormatPlain(parsed parser.ParsedResponse) string {
-	result := parsed.Command
-	if parsed.Explanation != "" {
-		result += "\n\n" + parsed.Explanation
-	}
-	return result
 }
