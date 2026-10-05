@@ -1,0 +1,1249 @@
+# heyman evaluation dataset
+# =========================
+#
+# Each case is one natural-language request. The runner invokes heyman as
+#   heyman <command> <question>   when `command` is set (that man page is preloaded)
+#   heyman -- <question>          when `command` is absent (model picks man pages itself)
+# and grades the single shell command it returns (the "candidate").
+#
+# Fields
+#   id        unique kebab-case id
+#   command   optional; see above
+#   question  the request text, passed verbatim
+#   tags      free-form. Conventions:
+#               easy | medium | hard   difficulty (exactly one per case)
+#               bsd-gnu     correct flags differ between macOS (BSD) and GNU/Linux;
+#                           `platforms` checks enforce the OS-specific form
+#               multi-tool  a good answer needs a pipeline / 2+ programs
+#               macos-only  only meaningful on macOS; runner should SKIP on other OSes
+#               needs-jq    requires jq; runner should SKIP (or mark n/a) if jq is absent
+#   reference 1+ known-good answers (for humans and an LLM judge). All references are
+#             valid on macOS. Where the GNU/Linux form differs, it is given in a YAML
+#             comment next to the case. reference[0] of an exec case is portable
+#             (runs on macOS and Linux), sometimes via `gnu-form 2>/dev/null || bsd-form`
+#             (GNU-first on purpose: e.g. GNU `stat -f` means --file-system and succeeds,
+#             so a BSD-first fallback would never trigger on Linux).
+#   checks    deterministic grading; ALL must pass
+#   forbid    optional list of RE2 regexes; the candidate FAILS if ANY matches
+#   platforms optional map GOOS -> extra checks (same syntax as `checks`), ANDed with
+#             `checks` when the runner is on that GOOS. Only darwin and linux are used.
+#   exec      optional execution check (see below)
+#
+# Check items (each item is a map with exactly one key)
+#   regex: R      Go RE2 regex R must match somewhere in the candidate (unanchored,
+#                 case-sensitive unless R starts with (?i); `.` does not cross newlines).
+#   program: P    P must be invoked as a command somewhere in the candidate. Suggested
+#                 (deliberately lenient) definition used when this dataset was validated:
+#                   1. split the candidate on |, ||, &&, ;, newlines, `$(`, backticks,
+#                      `(`, `)`, `{`, `}`  -- naively, ignoring quoting (so commands
+#                      inside `sh -c '...'` or `$(...)` are found too);
+#                   2. in each segment, drop leading VAR=value assignments and wrapper
+#                      words (sudo, env, command, builtin, exec, time, nohup, nice, !);
+#                   3. the first remaining word is a program (basename, quotes stripped);
+#                   4. additionally, the first non-option word after `xargs` (skipping
+#                      xargs options and the values of -I -J -L -n -P -s -E -d -a -R -S)
+#                      and the word after find's `-exec`/`-execdir`/`-ok` are programs.
+#                 A false positive (e.g. `END` from inside an awk script) is harmless.
+#   any: [...]    at least one sub-check passes (sub-checks use the same keys, may nest)
+#
+# Candidate pre-processing (recommended): strip surrounding ``` fences / backticks and
+# leading "$ " prompt, join backslash-newline continuations, trim whitespace.
+#
+# Exec semantics
+#   setup            bash script run in a fresh, empty temp dir (cwd). Portable macOS+Linux.
+#   compare          stdout        -> candidate stdout == reference[0] stdout
+#                    stdout_sorted -> same, after sorting lines
+#                    exit          -> candidate must just exit 0
+#                    For all modes the candidate must exit 0.
+#   timeout_seconds  per command
+#   The runner builds two identical fixtures (run `setup` twice in two fresh dirs), runs
+#   reference[0] in one and the candidate in the other with `bash -c`, stdin=/dev/null,
+#   and env LC_ALL=C TZ=UTC PAGER=cat GIT_PAGER=cat (git setups export their own
+#   GIT_* vars only inside setup; candidates see the user's normal git config).
+#   Output normalization before comparing (both sides): for each line, trim leading and
+#   trailing whitespace, collapse runs of spaces/tabs to one space, strip one leading
+#   "./"; drop empty lines. This makes `wc -l < f` (BSD pads with spaces) equal GNU
+#   output, and `grep -rl x .` equal `grep -rl x`.
+#   If reference[0] itself fails or prints nothing the case is broken -> report, don't score.
+#
+version: 1
+cases:
+
+  # ------------------------------------------------------------------ lsof / processes
+  - id: lsof-port-listener
+    command: lsof
+    question: which process is listening on port 8080
+    tags: [network, lsof, easy]
+    reference:
+      - lsof -nP -iTCP:8080 -sTCP:LISTEN
+      - lsof -i :8080
+      - lsof -i tcp:8080
+    checks:
+      - program: lsof
+      - regex: '-[a-zA-Z]*i\s*[''"]?[46]?[A-Za-z]*(@[^\s:]*)?:8080\b'
+
+  - id: lsof-kill-port
+    command: lsof
+    question: kill the process that is listening on port 3000
+    tags: [processes, lsof, kill, hard, multi-tool]
+    reference:
+      - lsof -ti tcp:3000 | xargs kill
+      - kill $(lsof -t -i:3000)
+      - lsof -nP -iTCP:3000 -sTCP:LISTEN -t | xargs kill
+    checks:
+      - program: lsof
+      - program: kill
+      - regex: '-[a-zA-Z]*i\s*[''"]?[46]?[A-Za-z]*(@[^\s:]*)?:3000\b'
+      - any:   # lsof must emit bare PIDs (-t) or the PID column must be extracted
+          - regex: '\s-[a-zA-Z]*t([a-zA-Z]*(\s|$)|i)'
+          - regex: 'awk[^|]*\$2'
+          - regex: 'cut\s'
+    forbid:
+      - 'kill\s+(-\S+\s+)*-1\b'
+
+  - id: pkill-by-name
+    command: pkill
+    question: kill all processes named node
+    tags: [processes, kill, easy]
+    reference:
+      - pkill -x node
+      - pkill node
+      - killall node
+    checks:
+      - any:
+          - program: pkill
+          - program: killall
+      - regex: '\bnode\b'
+    forbid:
+      - 'kill\s+(-\S+\s+)*-1\b'
+
+  - id: ps-top-memory
+    command: ps
+    question: show the 10 processes using the most memory
+    tags: [processes, ps, medium, bsd-gnu, multi-tool]
+    # linux: ps aux --sort=-%mem | head -n 11
+    reference:
+      - ps aux -m | head -n 11
+      - ps aux | sort -nrk 4 | head -n 10
+      - ps -eo pid,rss,comm | sort -k2 -nr | head -n 10
+    checks:
+      - program: ps
+      - any:
+          - program: head
+          - regex: 'NR\s*<=?\s*1[01]'
+      - regex: '(?i)(%mem|rss|pmem|vsz|\s-m(\s|$)|-[a-z]*k\s*[''"]?(4|6)\b)'
+    platforms:
+      darwin:   # BSD ps has no --sort; use -m or an external sort
+        - any:
+            - regex: '\bps\s+(\S+\s+)*-[a-zA-Z]*m(\s|$)'
+            - regex: '\|\s*sort\b'
+      linux:    # on Linux `ps -m` shows threads, it does not sort by memory
+        - any:
+            - regex: '--sort[= ][''"]?[-+]?(%mem|rss|pmem|vsz|size)'
+            - regex: '\|\s*sort\b'
+
+  - id: top-snapshot-cpu
+    command: top
+    question: print a single non-interactive snapshot of the top processes sorted by CPU usage
+    tags: [processes, top, medium, bsd-gnu]
+    # linux: top -b -n 1 -o %CPU
+    reference:
+      - top -l 1 -o cpu
+      - top -l 1 -o cpu -n 20
+    checks:
+      - program: top
+    platforms:
+      darwin:
+        - regex: '-[a-zA-Z]*l\s*1\b'
+        - regex: '-o\s*[''"]?cpu'
+      linux:
+        - any:
+            - regex: '\s-[a-zA-Z]*b'
+            - regex: '--batch'
+        - regex: '-[a-zA-Z]*n\s*1\b'
+
+  - id: lsof-https-process-names
+    question: list the unique names of processes that currently have established TCP connections to remote port 443
+    tags: [network, lsof, hard, multi-tool]
+    reference:
+      - lsof -nP -iTCP:443 -sTCP:ESTABLISHED | awk 'NR>1 {print $1}' | sort -u
+      - lsof -nP -iTCP -sTCP:ESTABLISHED | grep -- '->[^ ]*:443 ' | awk '{print $1}' | sort -u
+    checks:
+      - any:
+          - program: lsof
+          - program: ss
+          - program: netstat
+      - regex: '\b443\b'
+      - regex: '(?i)establ'
+      - any:
+          - program: awk
+          - program: cut
+      - any:
+          - regex: 'sort\s+(\S+\s+)*-[a-zA-Z]*u'
+          - regex: '--unique'
+          - program: uniq
+          - regex: '!\s*\w+\[\$1\]\+\+'
+
+  - id: xargs-parallel-gzip
+    command: xargs
+    question: gzip every .log file in the current directory, running 4 gzip processes in parallel
+    tags: [files, xargs, gzip, hard, multi-tool]
+    reference:
+      - find . -maxdepth 1 -name '*.log' -print0 | xargs -0 -n 1 -P 4 gzip
+      - ls *.log | xargs -n 1 -P 4 gzip
+      - printf '%s\0' *.log | xargs -0 -P 4 -n 1 gzip
+    checks:
+      - program: xargs
+      - program: gzip
+      - regex: '\.log'
+      - any:
+          - regex: '-P\s*[''"]?4\b'
+          - regex: '--max-procs[= ]4\b'
+      - any:   # without -n/-L/-I xargs hands all files to ONE gzip, so nothing runs in parallel
+          - regex: '-n\s*[''"]?\d'
+          - regex: '-L\s*\d'
+          - regex: '-I\s*\S'
+          - regex: '--max-args'
+          - regex: '--max-lines'
+    forbid:
+      - '\brm\b'
+
+  # ------------------------------------------------------------------ find
+  - id: find-large-files
+    command: find
+    question: find files larger than 100MB in my home directory
+    tags: [files, find, easy]
+    reference:
+      - find ~ -type f -size +100M
+      - find "$HOME" -type f -size +100M
+    checks:
+      - program: find
+      - regex: '(~|\$HOME|\$\{HOME\}|/Users/|/home/)'
+      - regex: '-size\s+[''"]?\+(100M|102400k|100000k|104857600c|100000000c)\b'
+    forbid:
+      - '-delete'
+
+  - id: find-newer-than-date
+    command: find
+    question: list the regular files under the current directory that were modified after 2024-01-15
+    tags: [files, find, dates, medium]
+    reference:
+      - find . -type f -newermt 2024-01-15
+      - find . -type f -newermt '2024-01-15 00:00:00'
+    checks:
+      - program: find
+      - regex: '-type\s+[''"]?f\b'
+      - regex: '-newermt\s+[''"]?2024-01-15'
+    forbid:
+      - '-delete'
+    exec:
+      setup: |
+        mkdir -p a/b
+        printf 'x\n' > old1.txt; printf 'x\n' > a/old2.txt
+        printf 'x\n' > new1.txt; printf 'x\n' > a/b/new2.txt; printf 'x\n' > a/new3.log
+        touch -t 202401010000 old1.txt a/old2.txt
+        touch -t 202402010000 new1.txt a/b/new2.txt
+        touch -t 202401200000 a/new3.log
+      compare: stdout_sorted
+      timeout_seconds: 10
+
+  - id: find-size-and-path
+    question: for every regular file under the current directory, print its size in bytes followed by its path, one file per line
+    tags: [files, find, stat, hard, bsd-gnu]
+    # linux: find . -type f -printf '%s %p\n'
+    reference:
+      - find . -type f -exec wc -c {} \;
+      - find . -type f -exec stat -f '%z %N' {} +
+    checks:
+      - program: find
+      - regex: '-type\s+[''"]?f\b'
+      - any:
+          - regex: '-printf'
+          - regex: '\bstat\s'
+          - regex: '\bwc\s+(-\S+\s+)*-c'
+          - regex: '\bdu\s+(-\S+\s+)*-[a-zA-Z]*b'
+    platforms:
+      darwin:   # BSD find has no -printf; BSD stat uses -f
+        - any:
+            - regex: '\bstat\s+(\S+\s+)*-[a-zA-Z]*f\s*[''"]?[^''"]*%z'
+            - regex: '\bwc\s+(-\S+\s+)*-c'
+      linux:
+        - any:
+            - regex: '-printf\s+[''"]?%s'
+            - regex: '\bstat\s+(\S+\s+)*(-c|--format|--printf)[= ]?\s*[''"]?%s'
+            - regex: '\bwc\s+(-\S+\s+)*-c'
+            - regex: '\bdu\s+(-\S+\s+)*-[a-zA-Z]*b'
+    exec:
+      setup: |
+        mkdir -p sub
+        printf 'hello\n' > a.txt
+        printf 'abc' > sub/b.dat
+        : > empty.txt
+        printf '123456789\n' > 'sub/c d.txt'
+      compare: stdout_sorted
+      timeout_seconds: 10
+
+  - id: largest-files-tree
+    question: show the 10 largest files anywhere under the current directory with human-readable sizes, biggest first
+    tags: [files, find, du, sort, hard, multi-tool]
+    reference:
+      - find . -type f -exec du -h {} + | sort -rh | head -n 10
+      - find . -type f -print0 | xargs -0 du -h | sort -hr | head -n 10
+      - find . -type f -exec ls -lh {} + | sort -k5 -rh | head -n 10
+    checks:
+      - program: find
+      - regex: '-type\s+[''"]?f\b'
+      - any:   # needs a human-aware sort (or ls -S)
+          - regex: '\bsort\s+(\S+\s+)*-[a-zA-Z]*h'
+          - regex: '--human-numeric-sort'
+          - regex: '\bls\s+(\S+\s+)*-[a-zA-Z]*S'
+      - any:   # biggest first
+          - regex: '\bsort\s+(\S+\s+)*-[a-zA-Z]*r'
+          - regex: '--reverse'
+          - regex: '\bls\s+(\S+\s+)*-[a-zA-Z]*S'
+      - any:
+          - regex: '\bhead\b'
+          - regex: 'NR\s*<=?\s*10'
+
+  - id: find-total-bytes-spaces
+    question: print the total size in bytes of all .log files under the current directory, as a single number; some file names contain spaces
+    tags: [files, find, xargs, wc, hard, multi-tool]
+    reference:
+      - find . -type f -name '*.log' -print0 | xargs -0 cat | wc -c
+      - find . -type f -name '*.log' -exec cat {} + | wc -c
+      - find . -type f -name '*.log' -exec stat -f%z {} + | awk '{s+=$1} END {print s}'
+    checks:
+      - program: find
+      - regex: '\.log'
+      - any:   # whitespace-safe plumbing
+          - regex: '-print0'
+          - regex: '-exec(dir)?\s'
+          - regex: 'while\s+(IFS=\S*\s+)?read'
+          - regex: '\bxargs\s+(\S+\s+)*-d\s*[''"]?\\n'
+      - any:
+          - program: wc
+          - program: awk
+          - program: paste
+          - program: bc
+    forbid:
+      - '\|\s*xargs\s+(du|cat|wc|stat|ls)\b'   # plain xargs splits on spaces
+    exec:
+      setup: |
+        mkdir -p 'logs/old runs' other
+        printf 'aaaa\n' > 'logs/old runs/first run.log'
+        printf 'bbbbbbbb\n' > logs/app.log
+        printf 'cc\n' > 'other/my file.log'
+        printf 'ignored\n' > notes.txt
+      compare: stdout
+      timeout_seconds: 10
+
+  - id: xargs-filelist-spaces
+    question: print the total number of lines, as a single number, across all the files listed in filelist.txt (one path per line; some paths contain spaces)
+    tags: [files, xargs, wc, hard, bsd-gnu, multi-tool]
+    # linux: xargs -d '\n' cat < filelist.txt | wc -l
+    reference:
+      - |-
+        tr '\n' '\0' < filelist.txt | xargs -0 cat | wc -l
+      - while IFS= read -r f; do cat "$f"; done < filelist.txt | wc -l
+      - xargs -I{} cat {} < filelist.txt | wc -l
+    checks:
+      - regex: 'filelist\.txt'
+      - any:
+          - program: wc
+          - program: awk
+      - any:
+          - regex: '\bxargs\s+(\S+\s+)*-[a-zA-Z]*0\b'
+          - regex: '--null'
+          - regex: '\bxargs\s+(\S+\s+)*-d\s*[''"]?\\n'
+          - regex: '--delimiter'
+          - regex: '\bwhile\b.*\bread\b'
+          - regex: '-I\s*\S'
+          - regex: 'IFS=\$''\\n'''
+    platforms:
+      darwin:   # BSD xargs has no -d
+        - any:
+            - regex: '\bxargs\s+(\S+\s+)*-[a-zA-Z]*0\b'
+            - regex: '--null'
+            - regex: '\bwhile\b.*\bread\b'
+            - regex: '-I\s*\S'
+            - regex: 'IFS=\$''\\n'''
+    exec:
+      setup: |
+        mkdir -p 'dir one'
+        printf 'a\nb\nc\n' > 'dir one/file a.txt'
+        printf 'd\ne\n' > plain.txt
+        printf 'f\n' > 'x y.txt'
+        printf 'dir one/file a.txt\nplain.txt\nx y.txt\n' > filelist.txt
+      compare: stdout
+      timeout_seconds: 10
+
+  - id: count-python-lines
+    question: print just the total number of lines across all .py files under the current directory, recursively
+    tags: [files, find, wc, medium, multi-tool]
+    reference:
+      - find . -type f -name '*.py' -exec cat {} + | wc -l
+      - find . -name '*.py' -print0 | xargs -0 cat | wc -l
+      - find . -name '*.py' -print0 | xargs -0 wc -l | tail -n 1 | awk '{print $1}'
+    checks:
+      - regex: '\.py'
+      - any:
+          - program: find
+          - regex: '\*\*/\*\.py'
+          - program: fd
+      - any:
+          - program: wc
+          - program: awk
+    exec:
+      setup: |
+        mkdir -p pkg/sub
+        printf 'import os\nprint(1)\n' > main.py
+        printf 'a = 1\nb = 2\nc = 3\n' > pkg/mod.py
+        printf 'x = 1\n' > pkg/sub/deep.py
+        printf 'not python\nat all\n' > README.txt
+      compare: stdout
+      timeout_seconds: 10
+
+  # ------------------------------------------------------------------ grep / text
+  - id: grep-count-matches
+    command: grep
+    question: count how many lines in app.log contain ERROR
+    tags: [text, grep, easy]
+    reference:
+      - grep -c ERROR app.log
+      - grep ERROR app.log | wc -l
+    checks:
+      - program: grep
+      - regex: 'ERROR'
+      - regex: 'app\.log'
+      - any:
+          - regex: '\s-[a-zA-Z]*c'
+          - regex: '--count'
+          - program: wc
+    exec:
+      setup: |
+        printf '2024-01-01 INFO start\n2024-01-01 ERROR db down\n2024-01-01 WARN slow\n2024-01-02 ERROR timeout\nERROR at start\nlowercase error is not counted\n' > app.log
+      compare: stdout
+      timeout_seconds: 10
+
+  - id: grep-context-after
+    command: grep
+    question: show every line containing "panic:" in server.log plus the 2 lines that follow each match
+    tags: [text, grep, medium]
+    reference:
+      - grep -A 2 'panic:' server.log
+      - |-
+        grep -A2 panic: server.log
+      - grep --after-context=2 'panic:' server.log
+    checks:
+      - program: grep
+      - regex: 'panic:'
+      - regex: 'server\.log'
+      - any:
+          - regex: '-A\s*[''"]?2\b'
+          - regex: '--after-context[= ]2\b'
+    exec:
+      setup: |
+        printf 'ok 1\nok 2\npanic: nil map\ngoroutine 1\nmain.go:10\nok 3\nok 4\nok 5\npanic: index out of range\ngoroutine 7\nworker.go:42\nok 6\n' > server.log
+      compare: stdout
+      timeout_seconds: 10
+
+  - id: sed-inplace-replace
+    command: sed
+    question: replace every occurrence of foo with bar in config.txt, editing the file in place
+    tags: [text, sed, medium, bsd-gnu]
+    # linux: sed -i 's/foo/bar/g' config.txt
+    reference:
+      - sed -i '' 's/foo/bar/g' config.txt
+      - sed -i.bak 's/foo/bar/g' config.txt
+      - perl -pi -e 's/foo/bar/g' config.txt
+    checks:
+      - any:
+          - program: sed
+          - program: perl
+      - regex: 's[/|#,:@](\\[b<])?foo(\\[b>])?[/|#,:@]bar[/|#,:@]g'
+      - regex: 'config\.txt'
+      - any:
+          - regex: '\s-[a-zA-Z]*i'
+          - regex: '--in-place'
+    forbid:
+      - 'config\.txt\s*>\s*config\.txt'
+    platforms:
+      darwin:   # BSD sed: -i takes a mandatory (possibly empty) suffix argument
+        - any:
+            - regex: '-[a-zA-Z]*i\s+[''"][''"](\s|$)'
+            - regex: '-[a-zA-Z]*i\s*[''"]?\.[A-Za-z0-9_~-]+'
+            - program: perl
+      linux:    # GNU sed: suffix must be attached; `-i ''` makes '' the script
+        - any:
+            - regex: '-[a-zA-Z]*i(\.[A-Za-z0-9_~-]+)?\s+(-[eE]\s+)*[''"]?s[/|#,:@]'
+            - regex: '-[a-zA-Z]*i(\.[A-Za-z0-9_~-]+)?\s+-e\s'
+            - regex: '--in-place'
+            - program: perl
+
+  - id: replace-in-js-files
+    question: replace oldName with newName in every .js file under src/, editing the files in place
+    tags: [text, sed, find, xargs, hard, bsd-gnu, multi-tool]
+    # linux: find src -name '*.js' -exec sed -i 's/oldName/newName/g' {} +
+    reference:
+      - find src -type f -name '*.js' -exec sed -i '' 's/oldName/newName/g' {} +
+      - grep -rl --include='*.js' oldName src | xargs sed -i '' 's/oldName/newName/g'
+      - find src -name '*.js' -print0 | xargs -0 perl -pi -e 's/oldName/newName/g'
+    checks:
+      - regex: '\bsrc\b'
+      - regex: '\.js'
+      - any:
+          - program: sed
+          - program: perl
+      - regex: 's[/|#,:@](\\[b<])?oldName(\\[b>])?[/|#,:@]newName[/|#,:@]g'
+      - any:
+          - program: find
+          - program: grep
+          - program: rg
+          - program: fd
+          - regex: '\*\*/\*\.js'
+          - regex: 'git\s+(grep|ls-files)'
+    platforms:
+      darwin:
+        - any:
+            - regex: '-[a-zA-Z]*i\s+[''"][''"](\s|$)'
+            - regex: '-[a-zA-Z]*i\s*[''"]?\.[A-Za-z0-9_~-]+'
+            - program: perl
+      linux:
+        - any:
+            - regex: '-[a-zA-Z]*i(\.[A-Za-z0-9_~-]+)?\s+(-[eE]\s+)*[''"]?s[/|#,:@]'
+            - regex: '-[a-zA-Z]*i(\.[A-Za-z0-9_~-]+)?\s+-e\s'
+            - regex: '--in-place'
+            - program: perl
+
+  - id: awk-sum-column
+    command: awk
+    question: print the sum of the third column of data.csv (comma-separated, no header row)
+    tags: [text, awk, medium]
+    reference:
+      - awk -F, '{s+=$3} END {print s}' data.csv
+      - awk -F',' '{ sum += $3 } END { print sum }' data.csv
+      - cut -d, -f3 data.csv | paste -sd+ - | bc
+    checks:
+      - any:
+          - program: awk
+          - program: paste
+      - regex: 'data\.csv'
+      - any:
+          - regex: '\$3\b'
+          - regex: '-f\s*3\b'
+      - any:   # the file is comma separated
+          - regex: '-F\s*[''"]?,'
+          - regex: 'FS\s*=\s*[''"]?,'
+          - regex: '-d\s*[''"]?,'
+    exec:
+      setup: |
+        printf 'a,x,12\nb,y,30\nc,z,7\nd,w,101\n' > data.csv
+      compare: stdout
+      timeout_seconds: 10
+
+  - id: top-ips-access-log
+    question: show the 3 most frequent IP addresses in access.log (the IP is the first field of each line) with their counts, most frequent first
+    tags: [text, awk, sort, uniq, hard, multi-tool]
+    reference:
+      - awk '{print $1}' access.log | sort | uniq -c | sort -rn | head -n 3
+      - cut -d' ' -f1 access.log | sort | uniq -c | sort -nr | head -3
+      - awk '{c[$1]++} END {for (ip in c) print c[ip], ip}' access.log | sort -rn | head -n 3
+    checks:
+      - regex: 'access\.log'
+      - program: sort
+      - any:
+          - program: uniq
+          - regex: '\+\+'
+      - any:
+          - regex: '\bsort\s+[^|]*-[a-zA-Z]*r'
+          - regex: '\bsort\s+[^|]*-k\s*[0-9,.]*[a-zA-Z]*r'
+          - regex: '--reverse'
+      - any:
+          - regex: '\bhead\s+(-n\s*)?-?3\b'
+          - regex: 'NR\s*<=?\s*3\b'
+    exec:
+      setup: |
+        for ip in 10.0.0.1 10.0.0.2 10.0.0.3 10.0.0.1 10.0.0.4 10.0.0.2 10.0.0.1 10.0.0.5 10.0.0.3 10.0.0.2 10.0.0.1 10.0.0.4 10.0.0.3 10.0.0.2 10.0.0.1; do
+          printf '%s - - [01/Jan/2024:00:00:00 +0000] "GET / HTTP/1.1" 200 12\n' "$ip"
+        done > access.log
+      compare: stdout
+      timeout_seconds: 10
+
+  - id: print-line-range
+    question: print lines 20 through 25 of server.log
+    tags: [text, sed, head, tail, easy]
+    reference:
+      - sed -n '20,25p' server.log
+      - awk 'NR>=20 && NR<=25' server.log
+      - head -n 25 server.log | tail -n 6
+      - tail -n +20 server.log | head -n 6
+    checks:
+      - regex: 'server\.log'
+      - any:
+          - regex: '20\s*,\s*25'
+          - regex: 'NR\s*>=?\s*(20|19)\b'
+          - regex: '\bhead\s+(-n\s*)?-?25\b.*\btail\b'
+          - regex: '\btail\s+(-n\s*)?\+20\b.*\bhead\b'
+    exec:
+      setup: |
+        i=1; while [ $i -le 40 ]; do printf 'line %d\n' $i; i=$((i+1)); done > server.log
+      compare: stdout
+      timeout_seconds: 10
+
+  - id: tr-lowercase
+    question: print the contents of NAMES.txt converted to lowercase
+    tags: [text, tr, easy]
+    reference:
+      - tr '[:upper:]' '[:lower:]' < NAMES.txt
+      - tr A-Z a-z < NAMES.txt
+      - awk '{print tolower($0)}' NAMES.txt
+    checks:
+      - regex: 'NAMES\.txt'
+      - any:
+          - regex: '\btr\s+[''"]?(\[:upper:\]|A-Z)[''"]?\s+[''"]?(\[:lower:\]|a-z)'
+          - regex: 'tolower'
+          - regex: '\\L'
+          - regex: '(?i)\.lower\(\)'
+    exec:
+      setup: |
+        printf 'Alice SMITH\nBOB Jones\ncarol\n' > NAMES.txt
+      compare: stdout
+      timeout_seconds: 10
+
+  - id: jq-extract-names
+    command: jq
+    question: print the name of every item in the items array of data.json, one per line, without quotes
+    tags: [json, jq, medium, needs-jq]
+    reference:
+      - jq -r '.items[].name' data.json
+      - jq -r '.items[] | .name' data.json
+      - jq --raw-output '.items | map(.name) | .[]' data.json
+    checks:
+      - program: jq
+      - regex: 'data\.json'
+      - regex: '\bitems\b'
+      - regex: '\bname\b'
+      - any:
+          - regex: '\s-[a-zA-Z]*r'
+          - regex: '--raw-output'
+          - regex: '\s-[a-zA-Z]*j'
+    exec:
+      setup: |
+        printf '{"count": 3, "items": [{"id": 1, "name": "alpha"}, {"id": 2, "name": "beta gamma"}, {"id": 3, "name": "delta"}]}\n' > data.json
+      compare: stdout
+      timeout_seconds: 10
+
+  # ------------------------------------------------------------------ stat / date / hashing
+  - id: stat-file-size
+    command: stat
+    question: print only the size in bytes of notes.txt
+    tags: [files, stat, medium, bsd-gnu]
+    # linux: stat -c%s notes.txt
+    reference:
+      - stat -c%s notes.txt 2>/dev/null || stat -f%z notes.txt
+      - stat -f %z notes.txt
+      - wc -c < notes.txt
+    checks:
+      - any:
+          - program: stat
+          - program: wc
+      - regex: 'notes\.txt'
+    platforms:
+      darwin:
+        - any:
+            - regex: '-f\s*[''"]?%z'
+            - regex: '\bwc\s+(-\S+\s+)*-c'
+      linux:
+        - any:
+            - regex: '-c\s*[''"]?%s'
+            - regex: '--format[= ][''"]?%s'
+            - regex: '--printf[= ][''"]?%s'
+            - regex: '\bwc\s+(-\S+\s+)*-c'
+    exec:
+      setup: |
+        printf 'hello world\nsecond line\n' > notes.txt
+      compare: stdout
+      timeout_seconds: 10
+
+  - id: stat-mtime-epoch
+    question: print the last-modified time of notes.txt as a unix timestamp (seconds since the epoch)
+    tags: [files, stat, dates, medium, bsd-gnu]
+    # linux: stat -c %Y notes.txt   or   date -r notes.txt +%s
+    reference:
+      - date -r notes.txt +%s
+      - stat -f %m notes.txt
+      - stat -t %s -f %Sm notes.txt
+    checks:
+      - regex: 'notes\.txt'
+      - any:
+          - program: stat
+          - program: date
+    platforms:
+      darwin:
+        - any:
+            - regex: '-f\s*[''"]?%m'
+            - regex: '-t\s*[''"]?%s[''"]?\s+-f\s*[''"]?%Sm'
+            - regex: '-f\s*[''"]?%Sm[''"]?\s+-t\s*[''"]?%s'
+            - regex: '\bdate\s+(\S+\s+)*-r\s*[''"]?notes\.txt.*%s'
+      linux:
+        - any:
+            - regex: '-c\s*[''"]?%Y'
+            - regex: '--format[= ][''"]?%Y'
+            - regex: '--printf[= ][''"]?%Y'
+            - regex: '\bdate\s+(\S+\s+)*(-r|--reference)[= ]*[''"]?notes\.txt.*%s'
+    exec:
+      setup: |
+        printf 'x\n' > notes.txt
+        touch -t 202401151030.00 notes.txt
+      compare: stdout
+      timeout_seconds: 10
+
+  - id: date-yesterday
+    command: date
+    question: print yesterday's date as YYYY-MM-DD
+    tags: [dates, date, medium, bsd-gnu]
+    # linux: date -d yesterday +%F
+    reference:
+      - date -v-1d +%Y-%m-%d 2>/dev/null || date -d yesterday +%Y-%m-%d
+      - date -v-1d +%F
+      - date -j -v-1d +%Y-%m-%d
+    checks:
+      - program: date
+      - any:
+          - regex: '%Y-%m-%d'
+          - regex: '%F'
+    platforms:
+      darwin:
+        - regex: '-v\s*[''"]?-(1d|24H)\b'
+      linux:
+        - regex: '(\s-d|--date)\b'
+    exec:   # flaky only if run across midnight
+      setup: |
+        :
+      compare: stdout
+      timeout_seconds: 10
+
+  - id: date-epoch-to-utc
+    question: convert the unix timestamp 1700000000 to a UTC date formatted as YYYY-MM-DD HH:MM:SS
+    tags: [dates, date, medium, bsd-gnu]
+    # linux: date -u -d @1700000000 '+%Y-%m-%d %H:%M:%S'
+    reference:
+      - |-
+        date -u -r 1700000000 '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date -u -d @1700000000 '+%Y-%m-%d %H:%M:%S'
+      - date -u -r 1700000000 +'%Y-%m-%d %H:%M:%S'
+      - TZ=UTC date -r 1700000000 '+%F %T'
+      - date -u -j -f %s 1700000000 '+%Y-%m-%d %H:%M:%S'
+    checks:
+      - program: date
+      - regex: '1700000000'
+      - any:
+          - regex: '\s-[a-zA-Z]*u'
+          - regex: '--utc'
+          - regex: '--universal'
+          - regex: 'TZ=[''"]?(UTC|GMT|Etc/UTC|UTC0|:UTC)'
+      - any:
+          - regex: '%Y-%m-%d %H:%M:%S'
+          - regex: '%F %T'
+          - regex: '%F %H:%M:%S'
+          - regex: '%Y-%m-%d %T'
+    platforms:
+      darwin:
+        - any:
+            - regex: '-[a-zA-Z]*r\s*[''"]?1700000000'
+            - regex: '-[a-zA-Z]*f\s*[''"]?%s[''"]?\s+[''"]?1700000000'
+      linux:
+        - regex: '@1700000000'
+    exec:
+      setup: |
+        :
+      compare: stdout
+      timeout_seconds: 10
+
+  - id: md5-just-hash
+    question: print only the MD5 hash of release.zip (just the hex digest, nothing else)
+    tags: [files, hashing, easy]
+    # linux: md5sum release.zip | cut -d' ' -f1
+    reference:
+      - md5 -q release.zip 2>/dev/null || md5sum release.zip | cut -d' ' -f1
+      - md5 -q release.zip
+      - md5sum release.zip | awk '{print $1}'
+      - openssl dgst -md5 -r release.zip | cut -d' ' -f1
+    checks:
+      - regex: 'release\.zip'
+      - any:
+          - program: md5
+          - program: md5sum
+          - program: openssl
+    platforms:
+      darwin:   # md5 needs -q; md5sum (macOS 14+ /sbin/md5sum) or openssl need trimming
+        - any:
+            - regex: '\bmd5\s+(\S+\s+)*-[a-zA-Z]*q'
+            - regex: '\|\s*(cut|awk|sed)\b'
+            - regex: '\bmd5\s+(\S+\s+)*-[a-zA-Z]*r.*\|'
+    exec:
+      setup: |
+        printf 'release contents v1.2.3\n' > release.zip
+      compare: stdout
+      timeout_seconds: 10
+
+  # ------------------------------------------------------------------ disk / permissions
+  - id: du-largest-subdirs
+    command: du
+    question: show the 5 largest subdirectories of the current directory, human-readable, largest first
+    tags: [disk, du, sort, hard, bsd-gnu, multi-tool]
+    # linux also accepts: du -h --max-depth=1 | sort -rh | head -n 6
+    reference:
+      - du -sh */ | sort -rh | head -n 5
+      - du -h -d 1 . | sort -hr | head -n 6
+      - du -hd1 | sort -rh | head -6
+    checks:
+      - program: du
+      - program: sort
+      - regex: '\bdu\s+(\S+\s+)*-[a-zA-Z]*h'
+      - any:
+          - regex: '\bsort\s+(\S+\s+)*-[a-zA-Z]*h'
+          - regex: '--human-numeric-sort'
+      - any:
+          - regex: '\bsort\s+(\S+\s+)*-[a-zA-Z]*r'
+          - regex: '--reverse'
+      - any:
+          - program: head
+          - regex: 'NR\s*<=?\s*[56]'
+    platforms:
+      darwin:   # BSD du has -d, not --max-depth
+        - any:
+            - regex: '\bdu\s+(\S+\s+)*-[a-zA-Z]*d\s*1\b'
+            - regex: '\bdu\s+(\S+\s+)*-[a-zA-Z]*s[a-zA-Z]*\s+(\S+\s+)*\S*\*'
+      linux:
+        - any:
+            - regex: '\bdu\s+(\S+\s+)*-[a-zA-Z]*d\s*1\b'
+            - regex: '--max-depth[= ]1\b'
+            - regex: '\bdu\s+(\S+\s+)*-[a-zA-Z]*s[a-zA-Z]*\s+(\S+\s+)*\S*\*'
+
+  - id: chmod-dirs-and-files
+    question: under public/, set every directory to mode 755 and every regular file to mode 644
+    tags: [permissions, chmod, find, hard, multi-tool]
+    reference:
+      - find public -type d -exec chmod 755 {} + && find public -type f -exec chmod 644 {} +
+      - find public -type d -print0 | xargs -0 chmod 755; find public -type f -print0 | xargs -0 chmod 644
+      - find public \( -type d -exec chmod 755 {} + \) -o \( -type f -exec chmod 644 {} + \)
+    checks:
+      - program: find
+      - program: chmod
+      - regex: '\bpublic\b'
+      - regex: '-type\s+[''"]?d[''"]?\s[^;&]*\b(0?755|u=rwx,go=rx|u=rwx,g=rx,o=rx)\b'
+      - regex: '-type\s+[''"]?f[''"]?\s[^;&]*\b(0?644|u=rw,go=r|u=rw,g=r,o=r)\b'
+    forbid:
+      - 'chmod\s+(-\S+\s+)*-R\s+(0?777|0?755|0?644)\b'
+      - '\b0?777\b'
+
+  # ------------------------------------------------------------------ archives
+  - id: zip-recursive
+    command: zip
+    question: create docs.zip containing the docs folder and everything in it
+    tags: [archives, zip, easy]
+    reference:
+      - zip -r docs.zip docs
+      - zip -r docs.zip docs/
+      - zip -qr docs.zip ./docs
+    checks:
+      - program: zip
+      - regex: '\s-[a-zA-Z]*r'
+      - regex: 'docs\.zip\s+(\./)?docs/?(\s|$)'
+
+  - id: tar-list-contents
+    command: tar
+    question: list the files inside archive.tar.gz without extracting it
+    tags: [archives, tar, easy]
+    reference:
+      - tar -tzf archive.tar.gz
+      - tar -tf archive.tar.gz
+      - tar tzf archive.tar.gz
+    checks:
+      - program: tar
+      - regex: 'archive\.tar\.gz'
+      - any:
+          - regex: '\btar\s+-?[a-zA-Z]*t[a-zA-Z]*(\s|$)'
+          - regex: '\s-[a-zA-Z]*t[a-zA-Z]*(\s|$)'
+          - regex: '--list'
+    forbid:
+      - '\btar\s+-?[a-zA-Z]*x'
+      - '\s-[a-zA-Z]*x[a-zA-Z]*(\s|$)'
+      - '--extract'
+    exec:
+      setup: |
+        mkdir -p proj/sub
+        printf 'hi\n' > proj/a.txt
+        printf 'x\n' > proj/sub/b.txt
+        tar -czf archive.tar.gz proj
+        rm -rf proj
+      compare: stdout_sorted
+      timeout_seconds: 10
+
+  - id: tar-extract-to-dir
+    command: tar
+    question: extract release.tar.gz into the directory /opt/app
+    tags: [archives, tar, medium]
+    reference:
+      - tar -xzf release.tar.gz -C /opt/app
+      - tar -xf release.tar.gz -C /opt/app
+      - tar --extract --gzip --file release.tar.gz --directory /opt/app
+    checks:
+      - program: tar
+      - regex: 'release\.tar\.gz'
+      - any:
+          - regex: '\btar\s+-?[a-zA-Z]*x'
+          - regex: '\s-[a-zA-Z]*x'
+          - regex: '--extract'
+          - regex: '--get'
+      - any:
+          - regex: '-C\s*[''"]?/opt/app'
+          - regex: '--directory[= ][''"]?/opt/app'
+          - regex: '\bcd\s+[''"]?/opt/app'
+
+  # ------------------------------------------------------------------ networking
+  - id: curl-headers-only
+    command: curl
+    question: show only the HTTP response headers from https://example.com
+    tags: [network, curl, easy]
+    reference:
+      - curl -I https://example.com
+      - curl -sI https://example.com
+      - curl -s -D - -o /dev/null https://example.com
+    checks:
+      - program: curl
+      - regex: 'https://example\.com'
+      - any:
+          - regex: '\s-[a-zA-Z]*I'
+          - regex: '--head\b'
+          - regex: '-D\s*-(\s|$)'
+          - regex: '--dump-header\s+-(\s|$)'
+
+  - id: curl-post-json
+    command: curl
+    question: 'send a POST request with the JSON body {"name": "test"} to http://localhost:3000/api/users'
+    tags: [network, curl, medium]
+    reference:
+      - |-
+        curl -X POST -H 'Content-Type: application/json' -d '{"name": "test"}' http://localhost:3000/api/users
+      - |-
+        curl --json '{"name":"test"}' http://localhost:3000/api/users
+    checks:
+      - program: curl
+      - regex: 'localhost:3000/api/users'
+      - regex: '\\?"name\\?"\s*:\s*\\?"test\\?"'
+      - any:
+          - regex: '(?i)content-type:\s*application/json'
+          - regex: '--json'
+      - any:
+          - regex: '\s-d(\s|[''"@{])'
+          - regex: '--data(-raw|-binary|-ascii)?\b'
+          - regex: '--json'
+    forbid:
+      - '-X\s*[''"]?(GET|PUT|PATCH|DELETE)\b'
+
+  - id: rsync-mirror-delete
+    command: rsync
+    question: sync the contents of my local build/ directory to deploy@web1:/var/www/site, deleting remote files that no longer exist locally
+    tags: [network, rsync, medium]
+    reference:
+      - rsync -avz --delete build/ deploy@web1:/var/www/site/
+      - rsync -a --delete ./build/ deploy@web1:/var/www/site
+    checks:
+      - program: rsync
+      - regex: '--delete\b'
+      - any:
+          - regex: '\s-[a-zA-Z]*[ar]'
+          - regex: '--archive'
+          - regex: '--recursive'
+      - regex: '(\s|\./|[''"])build/[''"]?\s'   # trailing slash: copy contents, not the dir
+      - regex: 'deploy@web1:[''"]?/var/www/site'
+    forbid:
+      - '--delete\S*\s+(\S+\s+)*/\s'
+
+  - id: ssh-local-tunnel
+    command: ssh
+    question: forward my local port 5432 to port 5432 on db.internal through the bastion host bastion.example.com
+    tags: [network, ssh, medium]
+    reference:
+      - ssh -N -L 5432:db.internal:5432 bastion.example.com
+      - ssh -L 5432:db.internal:5432 bastion.example.com
+      - ssh -N -L localhost:5432:db.internal:5432 bastion.example.com
+    checks:
+      - program: ssh
+      - regex: 'bastion\.example\.com'
+      - any:
+          - regex: '-[a-zA-Z]*L\s*[''"]?((localhost|127\.0\.0\.1):)?5432:db\.internal:5432'
+          - regex: '-J\s*\S*bastion\.example\.com.*-L\s*\S*5432:(localhost|127\.0\.0\.1):5432'
+          - regex: '-L\s*\S*5432:(localhost|127\.0\.0\.1):5432.*-J\s*\S*bastion\.example\.com'
+    forbid:
+      - '\s-R\s'
+
+  - id: nc-port-check
+    question: check whether port 5432 is open on db.example.com without sending any data
+    tags: [network, nc, easy]
+    reference:
+      - nc -zv db.example.com 5432
+      - nc -z db.example.com 5432
+      - nc -z -w 3 db.example.com 5432
+    checks:
+      - any:
+          - program: nc
+          - program: ncat
+          - program: netcat
+      - regex: '\s-[a-zA-Z]*z'
+      - regex: 'db\.example\.com'
+      - regex: '\b5432\b'
+
+  - id: dig-mx-short
+    command: dig
+    question: show just the MX records for gmail.com, nothing else
+    tags: [network, dns, dig, easy]
+    reference:
+      - dig +short MX gmail.com
+      - dig gmail.com MX +short
+      - dig -t MX gmail.com +short
+    checks:
+      - program: dig
+      - regex: '(?i)\bmx\b'
+      - regex: 'gmail\.com'
+      - any:
+          - regex: '\+short'
+          - regex: '\+noall\s+\+answer'
+
+  # ------------------------------------------------------------------ git
+  - id: git-blame-range
+    command: git
+    question: show who last changed lines 10 to 20 of main.go
+    tags: [git, medium]
+    reference:
+      - git blame -L 10,20 main.go
+      - git blame -L10,20 -- main.go
+      - git blame -L 10,+11 main.go
+    checks:
+      - program: git
+      - regex: 'main\.go'
+      - regex: '-L\s*[''"]?10,(20|\+11)\b'
+      - any:
+          - regex: '\bblame\b'
+          - regex: '\blog\b'
+
+  - id: git-show-file-at-revision
+    command: git
+    question: print the contents of package.json as it was 3 commits ago
+    tags: [git, medium]
+    reference:
+      - git show HEAD~3:package.json
+      - git show HEAD^^^:package.json
+      - git cat-file -p HEAD~3:./package.json
+    checks:
+      - program: git
+      - regex: '(HEAD|@)?(~3|\^\^\^|~~~)[''"]?:(\./)?package\.json'
+    exec:
+      setup: |
+        export GIT_AUTHOR_NAME=eval GIT_AUTHOR_EMAIL=eval@example.com GIT_COMMITTER_NAME=eval GIT_COMMITTER_EMAIL=eval@example.com
+        export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+        git init -q . && git symbolic-ref HEAD refs/heads/main
+        n=0; c() { n=$((n+1)); d="2024-01-$(printf %02d $n)T12:00:00Z"; GIT_AUTHOR_DATE=$d GIT_COMMITTER_DATE=$d git commit -q -m "$1"; }
+        for v in 1 2 3 4; do
+          printf '{\n  "name": "demo",\n  "version": "1.0.%s"\n}\n' "$v" > package.json
+          git add package.json; c "release 1.0.$v"
+        done
+      compare: stdout
+      timeout_seconds: 10
+
+  - id: git-recent-branches
+    command: git
+    question: list my local branches sorted by most recent commit, newest first, showing each branch name and how long ago it was last committed to
+    tags: [git, hard]
+    reference:
+      - git for-each-ref --sort=-committerdate refs/heads/ --format='%(refname:short) %(committerdate:relative)'
+      - git branch --sort=-committerdate --format='%(refname:short) %(committerdate:relative)'
+    checks:
+      - program: git
+      - regex: '--sort=[''"]?-(committerdate|authordate|creatordate)'
+      - any:
+          - regex: 'for-each-ref\b.*refs/heads'
+          - regex: '\bbranch\b'
+      - regex: '(committerdate|authordate|creatordate):relative'
+
+  - id: git-count-commits
+    question: how many commits are on the current git branch? print just the number
+    tags: [git, easy]
+    reference:
+      - git rev-list --count HEAD
+      - git log --oneline | wc -l
+    checks:
+      - program: git
+      - any:
+          - regex: 'rev-list\s+(\S+\s+)*--count'
+          - regex: '\bwc\s+(-\S+\s+)*-l'
+    forbid:
+      - '--all\b'      # counts every branch, not the current one
+    exec:
+      setup: |
+        export GIT_AUTHOR_NAME=eval GIT_AUTHOR_EMAIL=eval@example.com GIT_COMMITTER_NAME=eval GIT_COMMITTER_EMAIL=eval@example.com
+        export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+        git init -q . && git symbolic-ref HEAD refs/heads/main
+        n=0; c() { n=$((n+1)); d="2024-01-$(printf %02d $n)T12:00:00Z"; GIT_AUTHOR_DATE=$d GIT_COMMITTER_DATE=$d git commit -q -m "$1"; }
+        for i in 1 2 3 4 5 6 7; do printf '%s\n' "$i" >> f.txt; git add f.txt; c "commit $i"; done
+      compare: stdout
+      timeout_seconds: 10
+
+  - id: git-stash-untracked
+    question: stash all my uncommitted changes in git, including untracked files
+    tags: [git, easy]
+    reference:
+      - git stash -u
+      - git stash push --include-untracked
+      - git stash push -u -m wip
+    checks:
+      - program: git
+      - regex: '\bstash\b'
+      - any:
+          - regex: '\s-[a-zA-Z]*u\b'
+          - regex: '--include-untracked'
+    forbid:
+      - '\s(-a|--all)\b'        # -a also stashes ignored files (node_modules, build output...)
+      - 'stash\s+(drop|clear|pop)'
+
+  - id: git-changed-last-week-sizes
+    question: list the size of all files changed in git in the last week
+    tags: [git, du, xargs, hard, multi-tool]
+    reference:
+      - |-
+        git log --since='1 week ago' --name-only --pretty=format: | sort -u | xargs du -h 2>/dev/null
+      - git log --since=7.days --name-only --format= | sort -u | xargs ls -l
+      - |-
+        git log --since='1 week ago' --name-only --pretty=format: | sort -u | while read -r f; do [ -f "$f" ] && du -h "$f"; done
+    checks:
+      - program: git
+      - any:
+          - regex: '--(since|after|max-age)\b'
+          - regex: '@\{[^}]*(week|day)'
+      - regex: '(?i)(week|7[ ._]?days?|\b1w\b|168[ ._]?hours)'
+      - any:
+          - regex: '--name-only'
+          - regex: '--name-status'
+      - any:   # something must strip the commit headers
+          - regex: '--(pretty|format)[= ]'
+          - regex: '\bgit\s+diff\b'
+          - program: grep
+          - program: awk
+      - any:
+          - program: du
+          - program: ls
+          - program: wc
+          - program: stat
+
+  - id: git-top-churn-files
+    question: show the 3 files that have been changed in the most commits in this git repo, with their commit counts, most changed first
+    tags: [git, sort, uniq, hard, multi-tool]
+    reference:
+      - |-
+        git log --format= --name-only | grep -v '^$' | sort | uniq -c | sort -rn | head -n 3
+      - |-
+        git log --pretty=format: --name-only | awk 'NF' | sort | uniq -c | sort -nr | head -3
+    checks:
+      - program: git
+      - any:
+          - regex: '--name-only'
+          - regex: '--name-status'
+          - regex: '--numstat'
+      - program: sort
+      - any:
+          - program: uniq
+          - regex: '\+\+'
+      - any:
+          - regex: '\bhead\s+(-n\s*)?-?3\b'
+          - regex: 'NR\s*<=?\s*3\b'
+    exec:
+      setup: |
+        export GIT_AUTHOR_NAME=eval GIT_AUTHOR_EMAIL=eval@example.com GIT_COMMITTER_NAME=eval GIT_COMMITTER_EMAIL=eval@example.com
+        export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+        git init -q . && git symbolic-ref HEAD refs/heads/main
+        n=0; c() { n=$((n+1)); d="2024-01-$(printf %02d $n)T12:00:00Z"; GIT_AUTHOR_DATE=$d GIT_COMMITTER_DATE=$d git commit -q -m "$1"; }
+        for i in 1 2 3 4 5 6; do
+          echo "$i" >> a.go
+          [ $i -le 4 ] && echo "$i" >> b.go
+          [ $i -le 2 ] && echo "$i" >> c.go
+          [ $i -eq 1 ] && echo "$i" >> d.go
+          git add -A; c "change $i"
+        done
+      compare: stdout
+      timeout_seconds: 10
+
+  - id: git-deleted-file-contents
+    question: config/old.yml was deleted at some point in this git repo's history; print the contents it had just before it was deleted
+    tags: [git, hard, multi-tool]
+    reference:
+      - git show "$(git rev-list -n 1 HEAD -- config/old.yml)^:config/old.yml"
+      - git log --diff-filter=D --format=%H -- config/old.yml | xargs -I{} git show {}^:config/old.yml
+      - git show $(git log -1 --format=%h --diff-filter=D -- config/old.yml)~1:config/old.yml
+    checks:
+      - program: git
+      - regex: 'config/old\.yml'
+      - any:
+          - regex: '\brev-list\b'
+          - regex: '--diff-filter=[A-Z]*D'
+          - regex: '\blog\b'
+      - any:
+          - regex: '(\^|~1?)[''"]?:[''"]?(\./)?config/old\.yml'
+          - regex: '\bcat-file\b'
+    exec:
+      setup: |
+        export GIT_AUTHOR_NAME=eval GIT_AUTHOR_EMAIL=eval@example.com GIT_COMMITTER_NAME=eval GIT_COMMITTER_EMAIL=eval@example.com
+        export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+        git init -q . && git symbolic-ref HEAD refs/heads/main
+        n=0; c() { n=$((n+1)); d="2024-01-$(printf %02d $n)T12:00:00Z"; GIT_AUTHOR_DATE=$d GIT_COMMITTER_DATE=$d git commit -q -m "$1"; }
+        mkdir -p config
+        printf 'mode: legacy\nretries: 1\n' > config/old.yml; printf 'a\n' > README; git add -A; c 'add config'
+        printf 'mode: legacy\nretries: 3\ntimeout: 30\n' > config/old.yml; git add -A; c 'tune config'
+        printf 'b\n' >> README; git add -A; c 'docs'
+        git rm -q config/old.yml; c 'remove old config'
+        printf 'c\n' >> README; git add -A; c 'more docs'
+      compare: stdout
+      timeout_seconds: 10
+
+  # ------------------------------------------------------------------ macOS specifics
+  - id: pbcopy-pubkey
+    command: pbcopy
+    question: copy my SSH public key ~/.ssh/id_ed25519.pub to the clipboard
+    tags: [macos-only, clipboard, easy]
+    reference:
+      - pbcopy < ~/.ssh/id_ed25519.pub
+      - cat ~/.ssh/id_ed25519.pub | pbcopy
+    checks:
+      - program: pbcopy
+      - regex: '(~|\$HOME|\$\{HOME\}|/Users/[^/\s]+)/\.ssh/id_ed25519\.pub'
+    forbid:
+      - 'id_ed25519(\s|$|[''"|<>])'   # the private key
+
+  - id: mdfind-pdf
+    command: mdfind
+    question: use Spotlight to find all PDF files whose name contains invoice
+    tags: [macos-only, files, spotlight, medium]
+    reference:
+      - mdfind -name invoice | grep -i '\.pdf$'
+      - mdfind "kMDItemFSName == '*invoice*.pdf'c"
+      - mdfind 'kMDItemContentType == "com.adobe.pdf" && kMDItemFSName == "*invoice*"c'
+    checks:
+      - program: mdfind
+      - regex: '(?i)invoice'
+      - regex: '(?i)pdf'
+      - any:
+          - regex: '-name\b'
+          - regex: 'kMDItemFSName'
+          - regex: 'kMDItemDisplayName'
+
+  - id: defaults-show-hidden-files
+    command: defaults
+    question: make Finder always show hidden files
+    tags: [macos-only, defaults, medium]
+    reference:
+      - defaults write com.apple.finder AppleShowAllFiles -bool true && killall Finder
+      - defaults write com.apple.finder AppleShowAllFiles YES; killall Finder
+    checks:
+      - program: defaults
+      - regex: 'defaults\s+write\s+com\.apple\.[Ff]inder\s+AppleShowAllFiles\b'
+      - regex: '(?i)AppleShowAllFiles\s+(-bool(ean)?\s+|-string\s+)?[''"]?(true|yes|1)\b'
