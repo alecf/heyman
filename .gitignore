@@ -13,3 +13,7 @@
 
 # Eval run outputs
 /evals/results/
+
+# Local secrets
+.env
+.env.*

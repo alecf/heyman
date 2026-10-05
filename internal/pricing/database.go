@@ -2,153 +2,111 @@ package pricing
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
 // Database represents pricing information for LLM models
 type Database struct {
 	LastUpdated time.Time
-	Models      map[string]*ModelPricing
+	Models      map[string]*ModelPricing // keyed by "provider/model"
 }
 
 // ModelPricing represents pricing for a specific model
 type ModelPricing struct {
-	Provider           string
-	Model              string
-	InputPerMillion    float64 // Cost per 1M input tokens
-	OutputPerMillion   float64 // Cost per 1M output tokens
-	PricingURL         string  // URL to current pricing page
+	Provider         string
+	Model            string
+	InputPerMillion  float64 // Cost per 1M input tokens
+	OutputPerMillion float64 // Cost per 1M output tokens
+	PricingURL       string  // URL to current pricing page
+}
+
+const anthropicPricingURL = "https://www.anthropic.com/pricing#api"
+
+func anthropicModel(model string, in, out float64) *ModelPricing {
+	return &ModelPricing{Provider: "anthropic", Model: model, InputPerMillion: in, OutputPerMillion: out, PricingURL: anthropicPricingURL}
+}
+
+var database = &Database{
+	LastUpdated: time.Date(2026, 9, 25, 0, 0, 0, 0, time.UTC),
+	Models: map[string]*ModelPricing{
+		"anthropic/claude-haiku-4-5":  anthropicModel("claude-haiku-4-5", 1.00, 5.00),
+		"anthropic/claude-sonnet-5-5": anthropicModel("claude-sonnet-5-5", 2.00, 10.00),
+		"anthropic/claude-sonnet-5":   anthropicModel("claude-sonnet-5", 2.00, 10.00),
+		"anthropic/claude-sonnet-4-6": anthropicModel("claude-sonnet-4-6", 3.00, 15.00),
+		"anthropic/claude-opus-5-5":   anthropicModel("claude-opus-5-5", 4.00, 20.00),
+		"anthropic/claude-opus-5":     anthropicModel("claude-opus-5", 5.00, 25.00),
+		"anthropic/claude-opus-4-8":   anthropicModel("claude-opus-4-8", 5.00, 25.00),
+		"anthropic/claude-fable-5-1":  anthropicModel("claude-fable-5-1", 10.00, 50.00),
+	},
 }
 
 // GetDatabase returns the embedded pricing database
 func GetDatabase() *Database {
-	// Last updated: 2026-01-12
-	return &Database{
-		LastUpdated: time.Date(2026, 1, 12, 0, 0, 0, 0, time.UTC),
-		Models: map[string]*ModelPricing{
-			// OpenAI Models
-			"gpt-4o": {
-				Provider:         "openai",
-				Model:            "gpt-4o",
-				InputPerMillion:  2.50,
-				OutputPerMillion: 10.00,
-				PricingURL:       "https://openai.com/api/pricing/",
-			},
-			"gpt-4o-mini": {
-				Provider:         "openai",
-				Model:            "gpt-4o-mini",
-				InputPerMillion:  0.15,
-				OutputPerMillion: 0.60,
-				PricingURL:       "https://openai.com/api/pricing/",
-			},
-			"gpt-4-turbo": {
-				Provider:         "openai",
-				Model:            "gpt-4-turbo",
-				InputPerMillion:  10.00,
-				OutputPerMillion: 30.00,
-				PricingURL:       "https://openai.com/api/pricing/",
-			},
-			"gpt-4": {
-				Provider:         "openai",
-				Model:            "gpt-4",
-				InputPerMillion:  30.00,
-				OutputPerMillion: 60.00,
-				PricingURL:       "https://openai.com/api/pricing/",
-			},
-			"gpt-3.5-turbo": {
-				Provider:         "openai",
-				Model:            "gpt-3.5-turbo",
-				InputPerMillion:  0.50,
-				OutputPerMillion: 1.50,
-				PricingURL:       "https://openai.com/api/pricing/",
-			},
-
-			// Anthropic Models
-			"claude-opus-4-5-20251101": {
-				Provider:         "anthropic",
-				Model:            "claude-opus-4-5-20251101",
-				InputPerMillion:  15.00,
-				OutputPerMillion: 75.00,
-				PricingURL:       "https://www.anthropic.com/pricing",
-			},
-			"claude-sonnet-4-5-20250924": {
-				Provider:         "anthropic",
-				Model:            "claude-sonnet-4-5-20250924",
-				InputPerMillion:  3.00,
-				OutputPerMillion: 15.00,
-				PricingURL:       "https://www.anthropic.com/pricing",
-			},
-			"claude-3-5-sonnet-20241022": {
-				Provider:         "anthropic",
-				Model:            "claude-3-5-sonnet-20241022",
-				InputPerMillion:  3.00,
-				OutputPerMillion: 15.00,
-				PricingURL:       "https://www.anthropic.com/pricing",
-			},
-			"claude-3-5-haiku-20241022": {
-				Provider:         "anthropic",
-				Model:            "claude-3-5-haiku-20241022",
-				InputPerMillion:  0.80,
-				OutputPerMillion: 4.00,
-				PricingURL:       "https://www.anthropic.com/pricing",
-			},
-		},
-	}
+	return database
 }
 
-// GetPricing returns pricing for a specific model
-func (db *Database) GetPricing(model string) *ModelPricing {
-	return db.Models[model]
+// GetPricing returns pricing for a "provider/model" spec, or nil if unknown.
+// Dated snapshots ("claude-haiku-4-5-20251001") match their alias.
+func (db *Database) GetPricing(spec string) *ModelPricing {
+	if mp, ok := db.Models[spec]; ok {
+		return mp
+	}
+	for key, mp := range db.Models {
+		if strings.HasPrefix(spec, key+"-") {
+			return mp
+		}
+	}
+	return nil
+}
+
+// IsFree reports whether the provider runs models locally at no API cost.
+func IsFree(provider string) bool {
+	return provider == "ollama"
 }
 
 // CalculateCost calculates the cost for a given number of input and output tokens
-func (mp *ModelPricing) CalculateCost(inputTokens, outputTokens int) float64 {
+func (mp *ModelPricing) CalculateCost(inputTokens, outputTokens int64) float64 {
 	inputCost := float64(inputTokens) / 1_000_000.0 * mp.InputPerMillion
 	outputCost := float64(outputTokens) / 1_000_000.0 * mp.OutputPerMillion
 	return inputCost + outputCost
 }
 
-// FormatCost formats cost with disclaimer
-func (mp *ModelPricing) FormatCost(inputTokens, outputTokens int, lastUpdated time.Time) string {
-	cost := mp.CalculateCost(inputTokens, outputTokens)
-
-	warning := fmt.Sprintf("$%.4f (estimated, based on %s pricing)\n\n",
-		cost, lastUpdated.Format("2006-01-02"))
-	warning += fmt.Sprintf("⚠️  Pricing may have changed. Check current rates:\n")
-	warning += fmt.Sprintf("    %s", mp.PricingURL)
-
-	return warning
-}
-
-// FormatTokenUsage formats token usage information
-func FormatTokenUsage(inputTokens, outputTokens int, mp *ModelPricing, lastUpdated time.Time) string {
-	result := "Token usage:\n"
-	result += fmt.Sprintf("  Input:  %s tokens\n", formatNumber(inputTokens))
-	result += fmt.Sprintf("  Output: %s tokens\n", formatNumber(outputTokens))
-	result += fmt.Sprintf("  Total:  %s tokens\n", formatNumber(inputTokens+outputTokens))
-
-	if mp != nil {
-		result += fmt.Sprintf("  Cost:   %s", mp.FormatCost(inputTokens, outputTokens, lastUpdated))
-	} else {
-		result += "  Cost:   Free (Ollama)"
+// FormatTokenUsage formats token usage information. cost is the known cost
+// (nil if unknown); free marks local models.
+func FormatTokenUsage(inputTokens, outputTokens int64, cost *float64, free bool, mp *ModelPricing, lastUpdated time.Time) string {
+	var b strings.Builder
+	b.WriteString("Token usage:\n")
+	fmt.Fprintf(&b, "  Input:  %s tokens\n", formatNumber(inputTokens))
+	fmt.Fprintf(&b, "  Output: %s tokens\n", formatNumber(outputTokens))
+	fmt.Fprintf(&b, "  Total:  %s tokens\n", formatNumber(inputTokens+outputTokens))
+	switch {
+	case free:
+		b.WriteString("  Cost:   free (local model)")
+	case cost != nil && mp != nil:
+		fmt.Fprintf(&b, "  Cost:   $%.4f (estimated from %s list prices; check %s)", *cost, lastUpdated.Format("2006-01-02"), mp.PricingURL)
+	case cost != nil:
+		fmt.Fprintf(&b, "  Cost:   $%.4f (reported by provider)", *cost)
+	default:
+		b.WriteString("  Cost:   unknown (no pricing data for this model)")
 	}
-
-	return result
+	return b.String()
 }
 
 // formatNumber adds commas to large numbers
-func formatNumber(n int) string {
-	if n < 1000 {
-		return fmt.Sprintf("%d", n)
-	}
-
+func formatNumber(n int64) string {
 	str := fmt.Sprintf("%d", n)
-	result := ""
+	neg := strings.HasPrefix(str, "-")
+	str = strings.TrimPrefix(str, "-")
+	var b strings.Builder
 	for i, c := range str {
 		if i > 0 && (len(str)-i)%3 == 0 {
-			result += ","
+			b.WriteByte(',')
 		}
-		result += string(c)
+		b.WriteRune(c)
 	}
-	return result
+	if neg {
+		return "-" + b.String()
+	}
+	return b.String()
 }

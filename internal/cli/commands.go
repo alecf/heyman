@@ -9,12 +9,13 @@ import (
 
 	"github.com/alecf/heyman/internal/cache"
 	"github.com/alecf/heyman/internal/config"
+	"github.com/alecf/heyman/internal/llm"
 	"github.com/spf13/cobra"
 )
 
 // validModelName checks if a model name is safe for use in profile names
-// Allows: alphanumeric, dots, colons, hyphens, underscores
-var validModelName = regexp.MustCompile(`^[a-zA-Z0-9._:-]+$`)
+// Allows: alphanumeric, dots, colons, slashes (OpenRouter ids), hyphens, underscores
+var validModelName = regexp.MustCompile(`^[a-zA-Z0-9._:/-]+$`)
 
 // sizePattern matches size indicators like 1b, 7b, 70b, 270b
 var sizePattern = regexp.MustCompile(`(?i)^(\d+[bB])`)
@@ -196,94 +197,91 @@ You can also set up profiles manually by editing:
 
 			cfg, err := config.Load()
 			if err != nil {
-				cfg = &config.Config{
-					CacheDays: 30,
-					Profiles:  make(map[string]config.Profile),
-				}
+				return fmt.Errorf("failed to load config: %w", err)
 			}
-
-			// Simple text-based wizard
-			fmt.Println("Select a provider:")
-			fmt.Println("  1) OpenAI")
-			fmt.Println("  2) Anthropic")
-			fmt.Println("  3) Ollama (local)")
-			fmt.Print("\nChoice [1-3]: ")
 
 			reader := bufio.NewReader(os.Stdin)
-			choice, _ := reader.ReadString('\n')
-			choice = strings.TrimSpace(choice)
-
-			// Validate choice
-			if choice != "1" && choice != "2" && choice != "3" {
-				return fmt.Errorf("invalid choice: must be 1, 2, or 3")
+			ask := func(prompt, def string) string {
+				if def != "" {
+					fmt.Printf("%s [%s]: ", prompt, def)
+				} else {
+					fmt.Printf("%s: ", prompt)
+				}
+				line, _ := reader.ReadString('\n')
+				line = strings.TrimSpace(line)
+				if line == "" {
+					return def
+				}
+				return line
 			}
 
-			var provider, model, profileName string
+			fmt.Println("Select a provider:")
+			for i, p := range setupProviders {
+				fmt.Printf("  %d) %-14s %s\n", i+1, p.name, p.blurb)
+			}
+			choice := ask(fmt.Sprintf("\nChoice [1-%d]", len(setupProviders)), "1")
+			idx := 0
+			if _, err := fmt.Sscanf(choice, "%d", &idx); err != nil || idx < 1 || idx > len(setupProviders) {
+				return fmt.Errorf("invalid choice %q", choice)
+			}
+			sp := setupProviders[idx-1]
 
-			switch choice {
-			case "1":
-				provider = "openai"
-				model = "gpt-4o-mini" // Default to cheaper model
-				profileName = generateProfileName(cfg, provider, model)
-				fmt.Println("\nUsing OpenAI with gpt-4o-mini")
-				fmt.Println("Set your API key with: export OPENAI_API_KEY=sk-...")
-			case "2":
-				provider = "anthropic"
-				model = "claude-3-5-haiku-20241022" // Default to cheaper model
-				profileName = generateProfileName(cfg, provider, model)
-				fmt.Println("\nUsing Anthropic with Claude 3.5 Haiku")
-				fmt.Println("Set your API key with: export ANTHROPIC_API_KEY=sk-...")
-			case "3":
-				provider = "ollama"
-				fmt.Print("\nEnter model name (e.g., llama3.2:latest): ")
-				model, _ = reader.ReadString('\n')
-				model = strings.TrimSpace(model)
-				if model == "" {
-					model = "llama3.2:latest"
-				}
-				// Validate model name
-				if !validModelName.MatchString(model) {
-					return fmt.Errorf("invalid model name: only alphanumeric, dots, colons, hyphens, and underscores allowed")
-				}
-				profileName = generateProfileName(cfg, provider, model)
-				fmt.Println("\nUsing Ollama with", model)
-				fmt.Println("Make sure Ollama is running: ollama serve")
-			default:
-				return fmt.Errorf("invalid choice")
+			model := ask("Model", sp.defaultModel)
+			if model == "" {
+				return fmt.Errorf("a model name is required")
+			}
+			if !validModelName.MatchString(model) {
+				return fmt.Errorf("invalid model name: only letters, digits, and . : / _ - are allowed")
 			}
 
-			// Add profile
-			cfg.AddProfile(profileName, config.Profile{
-				Provider: provider,
-				Model:    model,
-			})
+			var baseURL string
+			if sp.name == llm.OpenAICompat {
+				baseURL = ask("Base URL (e.g. http://localhost:8080/v1)", "")
+				if baseURL == "" {
+					return fmt.Errorf("openai-compat needs a base URL")
+				}
+			}
 
-			// Set as default if first profile
-			if len(cfg.Profiles) == 1 {
+			profileName := generateProfileName(cfg, sp.name, model)
+			cfg.AddProfile(profileName, config.Profile{Provider: sp.name, Model: model, BaseURL: baseURL})
+			if len(cfg.Profiles) == 1 || cfg.DefaultProfile == "" || !cfg.ProfileExists(cfg.DefaultProfile) {
 				cfg.DefaultProfile = profileName
 			}
 
-			// Save config
 			if err := config.Save(cfg); err != nil {
 				return fmt.Errorf("failed to save config: %w", err)
 			}
 
-			fmt.Printf("\nProfile created: %s\n", profileName)
-			fmt.Printf("  Provider: %s\n", provider)
-			fmt.Printf("  Model: %s\n", model)
-
-			if cfg.DefaultProfile == profileName {
-				fmt.Printf("\nSet as default profile.\n")
-			} else {
-				fmt.Printf("\nTo make this the default, run: heyman profile set-default %s\n", profileName)
+			fmt.Printf("\nProfile created: %s (%s/%s)\n", profileName, sp.name, model)
+			if env := llm.APIKeyEnv(sp.name); env != "" && llm.APIKey(sp.name) == "" {
+				fmt.Printf("Set your API key: export %s=...\n", env)
 			}
-
-			fmt.Printf("\nTry it out:\n")
-			fmt.Printf("  heyman ls how do I list files by size\n")
-
+			if sp.hint != "" {
+				fmt.Println(sp.hint)
+			}
+			if cfg.DefaultProfile == profileName {
+				fmt.Println("Set as default profile.")
+			} else {
+				fmt.Printf("To make this the default, run: heyman profile set-default %s\n", profileName)
+			}
+			fmt.Printf("\nTry it out:\n  heyman ls how do I list files by size\n")
 			return nil
 		},
 	}
+}
+
+type setupProvider struct {
+	name, blurb, defaultModel, hint string
+}
+
+var setupProviders = []setupProvider{
+	{llm.Anthropic, "Claude API (recommended)", "claude-haiku-4-5", ""},
+	{llm.ClaudeCode, "use your Claude Code login via the claude CLI (slower)", "haiku", "Requires the `claude` CLI to be installed and logged in."},
+	{llm.OpenAI, "OpenAI API", "", ""},
+	{llm.OpenRouter, "OpenRouter (many hosted open-weight models)", "", ""},
+	{llm.Google, "Gemini API", "", ""},
+	{llm.Ollama, "local models via Ollama", "qwen3:4b", "Make sure Ollama is running (ollama serve) and the model is pulled (ollama pull <model>)."},
+	{llm.OpenAICompat, "any OpenAI-compatible server (llama.cpp, vLLM, LM Studio…)", "", ""},
 }
 
 func profileDeleteCmd() *cobra.Command {
@@ -462,26 +460,14 @@ func testConfigCmd() *cobra.Command {
 
 			hasErrors := false
 
-			for name, profile := range cfg.Profiles {
+			for _, name := range cfg.SortedProfileNames() {
+				profile := cfg.Profiles[name]
 				fmt.Printf("Testing %s (%s %s)... ", name, profile.Provider, profile.Model)
 
-				// Check API keys for cloud providers
-				switch profile.Provider {
-				case "openai":
-					if cfg.GetAPIKey("openai") == "" {
-						fmt.Println("Missing OPENAI_API_KEY")
-						hasErrors = true
-						continue
-					}
-				case "anthropic":
-					if cfg.GetAPIKey("anthropic") == "" {
-						fmt.Println("Missing ANTHROPIC_API_KEY")
-						hasErrors = true
-						continue
-					}
-				case "ollama":
-					// Check if Ollama is running
-					// For now, just assume it's OK
+				if _, err := llm.NewLanguageModel(cmd.Context(), llm.Spec{Provider: profile.Provider, Model: profile.Model}, llm.Options{BaseURL: profile.BaseURL}); err != nil && profile.Provider != llm.ClaudeCode {
+					fmt.Println(err)
+					hasErrors = true
+					continue
 				}
 
 				fmt.Println("OK")

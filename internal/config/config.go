@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/adrg/xdg"
 	"github.com/pelletier/go-toml/v2"
-	"github.com/spf13/viper"
 )
 
 // Config represents the entire heyman configuration
@@ -19,11 +19,20 @@ type Config struct {
 
 // Profile represents an LLM provider configuration
 type Profile struct {
-	Name          string         `toml:"-"` // Set from map key
-	Provider      string         `toml:"provider"` // "openai", "anthropic", "ollama"
-	Model         string         `toml:"model"`
-	ContextWindow int            `toml:"context_window,omitempty"` // Max context window in tokens (defaults to 8192)
+	Name     string `toml:"-"`        // Set from map key
+	Provider string `toml:"provider"` // see llm.Providers()
+	Model    string `toml:"model"`
+	// BaseURL overrides the provider endpoint (required for openai-compat,
+	// optional for ollama and proxies).
+	BaseURL string `toml:"base_url,omitempty"`
+	// ContextWindow is deprecated and ignored; kept so old configs still load.
+	ContextWindow int            `toml:"context_window,omitempty"`
 	Options       map[string]any `toml:"options,omitempty"`
+}
+
+// Spec returns the profile's "provider/model" string.
+func (p *Profile) Spec() string {
+	return p.Provider + "/" + p.Model
 }
 
 // Load reads the configuration from the config file and environment variables
@@ -80,34 +89,12 @@ func Save(cfg *Config) error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	// Write to file (0600 for security - contains API keys via env)
+	// Write to file (0600: profiles may contain endpoints and options)
 	if err := os.WriteFile(configPath, data, 0600); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 
 	return nil
-}
-
-// GetActiveProfile returns the active profile based on flags, env vars, and config
-func (c *Config) GetActiveProfile() (*Profile, error) {
-	var profileName string
-
-	// Priority: CLI flag > env var > config default
-	if viper.IsSet("profile") {
-		profileName = viper.GetString("profile")
-	} else if c.DefaultProfile != "" {
-		profileName = c.DefaultProfile
-	} else {
-		return nil, fmt.Errorf("no profile specified and no default profile set")
-	}
-
-	profile, ok := c.Profiles[profileName]
-	if !ok {
-		return nil, fmt.Errorf("profile %q not found", profileName)
-	}
-
-	profile.Name = profileName
-	return &profile, nil
 }
 
 // AddProfile adds or updates a profile
@@ -163,50 +150,8 @@ func (c *Config) SortedProfileNames() []string {
 	for name := range c.Profiles {
 		names = append(names, name)
 	}
-	// Sort alphabetically
-	for i := 0; i < len(names)-1; i++ {
-		for j := i + 1; j < len(names); j++ {
-			if names[i] > names[j] {
-				names[i], names[j] = names[j], names[i]
-			}
-		}
-	}
+	sort.Strings(names)
 	return names
-}
-
-// GetContextWindow returns the context window for a profile, defaulting to 8192
-func (p *Profile) GetContextWindow() int {
-	if p.ContextWindow > 0 {
-		return p.ContextWindow
-	}
-	return 8192 // Default context window
-}
-
-// GetAPIKey returns the API key for the given provider
-// Checks environment variables first, then profile options
-func (c *Config) GetAPIKey(provider string) string {
-	// Check provider-specific environment variables
-	switch provider {
-	case "openai":
-		if key := os.Getenv("OPENAI_API_KEY"); key != "" {
-			return key
-		}
-	case "anthropic":
-		if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
-			return key
-		}
-	}
-
-	// Ollama doesn't need API key
-	return ""
-}
-
-// GetOllamaHost returns the Ollama host URL
-func GetOllamaHost() string {
-	if host := os.Getenv("OLLAMA_HOST"); host != "" {
-		return host
-	}
-	return "http://localhost:11434"
 }
 
 // getConfigPath returns the path to the config file

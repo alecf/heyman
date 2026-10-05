@@ -8,24 +8,23 @@ import (
 	"time"
 
 	"github.com/alecf/heyman/internal/config"
-	"github.com/alecf/heyman/internal/llm"
 )
 
 // Entry represents a cached response
 type Entry struct {
-	Key        string              `json:"key"`
-	Command    string              `json:"command"`
-	Question   string              `json:"question"`
-	Model      string              `json:"model"`
-	Response   *llm.QueryResponse  `json:"response"`
-	CreatedAt  time.Time           `json:"created_at"`
-	AccessedAt time.Time           `json:"accessed_at"`
-	AccessCount int                `json:"access_count"`
+	Key         string          `json:"key"`
+	Command     string          `json:"command"`
+	Question    string          `json:"question"`
+	Model       string          `json:"model"`
+	Response    json.RawMessage `json:"response"`
+	CreatedAt   time.Time       `json:"created_at"`
+	AccessedAt  time.Time       `json:"accessed_at"`
+	AccessCount int             `json:"access_count"`
 }
 
 // Cache manages response caching
 type Cache struct {
-	cacheDir  string
+	cacheDir   string
 	maxAgeDays int
 }
 
@@ -37,61 +36,57 @@ func New(maxAgeDays int) *Cache {
 	}
 }
 
-// Get retrieves a cached response
-func (c *Cache) Get(command, question, model string) (*llm.QueryResponse, bool) {
-	key := GenerateKey(command, question, model)
+// Get loads the cached value for key into v. It returns false on a miss,
+// an expired entry, or an entry that can't be decoded into v.
+func (c *Cache) Get(key string, v any) bool {
 	entryPath := filepath.Join(c.cacheDir, key+".json")
 
-	// Check if cached file exists
 	data, err := os.ReadFile(entryPath)
 	if err != nil {
-		return nil, false
+		return false
 	}
 
 	var entry Entry
-	if err := json.Unmarshal(data, &entry); err != nil {
-		return nil, false
+	if err := json.Unmarshal(data, &entry); err != nil || len(entry.Response) == 0 || string(entry.Response) == "null" {
+		os.Remove(entryPath)
+		return false
 	}
 
-	// Check if entry has expired
 	if c.isExpired(entry.CreatedAt) {
-		// Delete expired entry
 		os.Remove(entryPath)
-		return nil, false
+		return false
 	}
 
-	// Validate response is not nil (could be nil from corrupted cache)
-	if entry.Response == nil {
-		// Delete corrupted entry
+	if err := json.Unmarshal(entry.Response, v); err != nil {
 		os.Remove(entryPath)
-		return nil, false
+		return false
 	}
 
-	// Update access metadata
+	// Best-effort access bookkeeping; a failure here shouldn't fail the read.
 	entry.AccessedAt = time.Now()
 	entry.AccessCount++
-	c.saveEntry(&entry)
+	_ = c.saveEntry(&entry)
 
-	// Mark response as cached
-	response := entry.Response
-	response.Cached = true
-
-	return response, true
+	return true
 }
 
-// Set stores a response in the cache
-func (c *Cache) Set(command, question, model string, response *llm.QueryResponse) error {
-	key := GenerateKey(command, question, model)
-
+// Set stores v under key. command, question and model are recorded for
+// cache-stats and debugging only.
+func (c *Cache) Set(key, command, question, model string, v any) error {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("failed to marshal cache value: %w", err)
+	}
+	now := time.Now()
 	entry := &Entry{
 		Key:         key,
 		Command:     command,
 		Question:    question,
 		Model:       model,
-		Response:    response,
-		CreatedAt:   time.Now(),
-		AccessedAt:  time.Now(),
-		AccessCount: 1,
+		Response:    raw,
+		CreatedAt:   now,
+		AccessedAt:  now,
+		AccessCount: 0,
 	}
 
 	return c.saveEntry(entry)
@@ -189,11 +184,11 @@ func (c *Cache) Clear() (int, error) {
 
 // Stats returns cache statistics
 type Stats struct {
-	TotalEntries int       `json:"total_entries"`
-	TotalSizeBytes int64   `json:"total_size_bytes"`
-	OldestEntry  *time.Time `json:"oldest_entry,omitempty"`
-	NewestEntry  *time.Time `json:"newest_entry,omitempty"`
-	TotalHits    int        `json:"total_hits"`
+	TotalEntries   int        `json:"total_entries"`
+	TotalSizeBytes int64      `json:"total_size_bytes"`
+	OldestEntry    *time.Time `json:"oldest_entry,omitempty"`
+	NewestEntry    *time.Time `json:"newest_entry,omitempty"`
+	TotalHits      int        `json:"total_hits"`
 }
 
 // GetStats returns cache statistics
