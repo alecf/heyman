@@ -44,7 +44,7 @@ build-all:
 # Evaluation harness (see evals/README.md). Needs API keys in the environment
 # (e.g. `set -a; . ./.env; set +a`). Override with EVAL_ARGS="--models … --judge …".
 EVAL_MODELS ?= anthropic/claude-haiku-4-5
-.PHONY: eval eval-quick eval-self-test
+.PHONY: eval eval-quick eval-self-test site-data
 eval:
 	go run ./cmd/heyman-eval --models $(EVAL_MODELS) --exec $(EVAL_ARGS)
 
@@ -55,3 +55,8 @@ eval-quick:
 # Grade the references against their own checks (no model calls).
 eval-self-test:
 	go run ./cmd/heyman-eval --self-test --exec
+
+# Regenerate the project page's eval snapshot from result directories, e.g.
+#   make site-data RESULTS="evals/results/full-20261005 evals/results/claude-code-subset-20261005"
+site-data:
+	go run ./cmd/heyman-eval --export-site site/data/evals.json $(RESULTS)

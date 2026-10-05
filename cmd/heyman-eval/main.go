@@ -45,6 +45,7 @@ func run() int {
 		maxCost   = flag.Float64("max-cost", 0, "stop scheduling attempts before estimated spend exceeds this many USD (0 = no limit)")
 		selfTest  = flag.Bool("self-test", false, "grade the references instead of calling models")
 		list      = flag.Bool("list", false, "list matching cases and exit")
+		exportTo  = flag.String("export-site", "", "write a site JSON snapshot of the result dirs given as arguments (re-graded with the current cases; no model calls) and exit")
 		gradeCmd  = flag.String("grade", "", "grade this command against the matching cases (deterministic checks; exec too with --exec) and exit")
 	)
 	flag.Parse()
@@ -81,6 +82,10 @@ func run() int {
 		}
 		fmt.Printf("%d cases\n", len(cases))
 		return 0
+	}
+
+	if *exportTo != "" {
+		return exportSite(cases, *exportTo, flag.Args())
 	}
 
 	if *gradeCmd != "" {
@@ -298,4 +303,29 @@ func reproCommand() string {
 		parts = append(parts, a)
 	}
 	return strings.Join(parts, " ")
+}
+
+func exportSite(cases []*eval.Case, out string, dirs []string) int {
+	if len(dirs) == 0 {
+		fmt.Fprintln(os.Stderr, "--export-site needs one or more results directories as arguments")
+		return 2
+	}
+	data, err := eval.BuildSiteData(cases, dirs, "darwin", time.Now().UTC().Format("2006-01-02"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	raw, err := json.MarshalIndent(data, "", " ")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if err := os.WriteFile(out, append(raw, '\n'), 0o644); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	for _, m := range data.Models {
+		fmt.Printf("%-30s %d/%d\n", m.Model, m.Pass, m.N)
+	}
+	return 0
 }

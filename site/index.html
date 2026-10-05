@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>heyman</title>
+<meta name="description" content="heyman turns a plain-English request into a shell command, checking the man pages on your machine so the flags match your system. Eval results across models.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232a78d6'/%3E%3Ctext x='6' y='22' font-family='monospace' font-size='16' font-weight='700' fill='white'%3E$_%3C/text%3E%3C/svg%3E">
+<style>
+:root {
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --border: rgba(11,11,11,0.10);
+  --series: #2a78d6;
+  --series-hover: #1f63b5;
+  --good: #0ca30c;
+  --good-text: #006300;
+  --critical: #d03b3b;
+  --code-bg: #f0efea;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+    --series: #3987e5; --series-hover: #5a9cec; --good-text: #0ca30c; --code-bg: #232321;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+  --series: #3987e5; --series-hover: #5a9cec; --good-text: #0ca30c; --code-bg: #232321;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 16px/1.55 var(--sans); }
+main { max-width: 880px; margin: 0 auto; padding: 48px 16px 80px; }
+h1 { font: 700 2.4rem/1.1 var(--mono); margin: 0 0 12px; letter-spacing: -0.02em; }
+h2 { font-size: 1.35rem; margin: 56px 0 12px; }
+h3 { font-size: 1rem; margin: 28px 0 8px; }
+p { margin: 0 0 14px; color: var(--ink-2); }
+p strong, li strong { color: var(--ink); }
+a { color: var(--series); }
+code { font: 0.88em var(--mono); background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+pre { font: 0.86rem/1.6 var(--mono); background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; overflow-x: auto; margin: 0 0 16px; }
+pre .p { color: var(--muted); user-select: none; }
+pre .o { color: var(--ink-2); }
+.lede { font-size: 1.12rem; color: var(--ink-2); max-width: 640px; }
+.links { display: flex; gap: 16px; flex-wrap: wrap; margin: 18px 0 32px; font-size: 0.95rem; }
+ul { color: var(--ink-2); padding-left: 20px; }
+li { margin: 4px 0; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin: 16px 0; }
+.note { font-size: 0.88rem; color: var(--muted); }
+
+/* chart */
+.chart-title { font-weight: 600; margin: 0 0 4px; }
+.chart-sub { font-size: 0.88rem; color: var(--muted); margin: 0 0 16px; }
+.bars { display: grid; grid-template-columns: minmax(120px, max-content) 1fr; gap: 10px 14px; align-items: center; }
+.bar-label { font: 0.88rem var(--mono); color: var(--ink); text-align: right; white-space: nowrap; }
+.bar-label small { display: block; font: 0.75rem var(--sans); color: var(--muted); }
+.bar-track { position: relative; height: 26px; background-image: repeating-linear-gradient(to right, var(--grid) 0 1px, transparent 1px 25%); background-size: calc(100% - 1px) 100%; background-repeat: no-repeat; border-left: 1px solid var(--axis); }
+.bar { position: absolute; left: 0; top: 4px; bottom: 4px; background: var(--series); border-radius: 0 4px 4px 0; cursor: default; outline: none; }
+.bar:hover, .bar:focus-visible { background: var(--series-hover); }
+.bar:focus-visible { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--series); }
+.bar-value { position: absolute; top: 50%; transform: translateY(-50%); font: 600 0.85rem var(--sans); color: var(--ink); white-space: nowrap; padding-left: 8px; pointer-events: none; }
+.axis { display: grid; grid-template-columns: minmax(120px, max-content) 1fr; gap: 14px; margin-top: 6px; }
+.axis-ticks { display: flex; justify-content: space-between; font-size: 0.72rem; color: var(--muted); }
+.tooltip { position: fixed; z-index: 10; pointer-events: none; background: var(--surface); color: var(--ink); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 0.82rem; box-shadow: 0 4px 16px rgba(0,0,0,0.15); max-width: min(420px, calc(100vw - 32px)); display: none; }
+.tooltip .v { font-weight: 700; font-size: 0.95rem; }
+.tooltip .k { color: var(--ink-2); }
+.tooltip code { white-space: pre-wrap; word-break: break-word; }
+
+/* tables */
+.table-wrap { overflow-x: auto; margin: 0 -4px; padding: 0 4px; }
+table { border-collapse: collapse; width: 100%; font-size: 0.86rem; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th { font-weight: 600; color: var(--ink-2); font-size: 0.78rem; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.model { font-family: var(--mono); font-size: 0.82rem; }
+.pass { color: var(--good-text); }
+.fail { color: var(--critical); }
+.status { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; }
+.matrix td.q { white-space: normal; min-width: 240px; color: var(--ink-2); }
+.matrix td.q code { font-size: 0.8em; }
+.matrix td.c { text-align: center; cursor: pointer; }
+.matrix tr.detail td { white-space: normal; background: var(--surface); }
+.detail-grid { display: grid; gap: 8px; padding: 6px 0; }
+.detail-grid div { font-size: 0.84rem; color: var(--ink-2); }
+.detail-grid code { white-space: pre-wrap; word-break: break-word; }
+.tag { display: inline-block; font-size: 0.7rem; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; margin: 2px 2px 0 0; }
+.filters { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 12px; }
+.filters button { font: 0.82rem var(--sans); color: var(--ink-2); background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px; cursor: pointer; }
+.filters button[aria-pressed="true"] { color: var(--ink); border-color: var(--series); box-shadow: inset 0 0 0 1px var(--series); }
+footer { margin-top: 64px; font-size: 0.85rem; color: var(--muted); }
+@media (max-width: 560px) {
+  h1 { font-size: 2rem; }
+  .bars, .axis { grid-template-columns: 96px 1fr; }
+  .bar-label { white-space: normal; font-size: 0.78rem; }
+}
+</style>
+</head>
+<body>
+<main>
+  <h1>heyman</h1>
+  <p class="lede">Ask for a shell command in plain English. heyman lets the model read the man pages on <em>your</em> machine before it answers, so the flags match your system: BSD tools on macOS, GNU on Linux.</p>
+  <div class="links">
+    <a href="https://github.com/alecf/heyman">GitHub</a>
+    <a href="https://github.com/alecf/heyman#install">Install</a>
+    <a href="#evals">Eval results</a>
+    <a href="https://github.com/alecf/heyman/blob/main/docs/architecture.md">How it works</a>
+  </div>
+
+<pre><span class="p">$ </span>heyman lsof which process is listening on port 8080
+<span class="o">lsof -i :8080</span>
+
+<span class="p">$ </span>heyman stat print the size in bytes and modification time of notes.txt
+<span class="o">stat -f "%z %Sm" notes.txt</span>
+
+<span class="p">$ </span>heyman -- compress the logs directory into a tarball, excluding .tmp files
+<span class="o">tar --exclude='*.tmp' -czf logs.tar.gz logs</span></pre>
+
+  <p>Name the program you have in mind (<code>heyman tar …</code>) and its man page is loaded up front. Or put <code>--</code> before the request and the model searches the installed man pages itself. Either way it can call three tools while it works:</p>
+  <ul>
+    <li><code>man</code> reads any man page on this machine, in chunks or filtered by a search pattern</li>
+    <li><code>man_search</code> searches man page names and descriptions, like <code>man -k</code></li>
+    <li><code>which</code> checks whether a program is installed</li>
+  </ul>
+  <p>Only the command goes to stdout, so <code>$(heyman …)</code> works. Add <code>--explain</code> for an explanation, <code>-v</code> to see which man pages it read.</p>
+
+  <h2 id="install">Install</h2>
+<pre><span class="p">$ </span>go install github.com/alecf/heyman/cmd/heyman@latest
+<span class="p">$ </span>export ANTHROPIC_API_KEY=…
+<span class="p">$ </span>heyman ls list files by size, largest first</pre>
+  <p>Any model works with <code>--model provider/model</code>: <code>anthropic</code>, <code>openai</code>, <code>openrouter</code>, <code>google</code>, <code>ollama</code>, any OpenAI-compatible server, or <code>claude-code</code> to use a Claude Code login. The default is <code>anthropic/claude-haiku-4-5</code>.</p>
+
+  <h2 id="evals">Eval results</h2>
+  <p>50 requests a developer might type, from <code>lsof</code> one-liners to multi-tool pipelines like “list the size of all files changed in git in the last week.” Eleven are cases where the correct flags differ between macOS and Linux (<code>sed -i ''</code>, <code>stat -f</code>, <code>date -v-1d</code>), which is what reading local man pages is supposed to fix.</p>
+  <p>Each answer has to pass regex checks that accept equivalent spellings. Twenty-two cases are also run in a sandbox against a fixture and compared with the reference output. An LLM judge (Claude Sonnet 5.5) gives a second opinion, reported separately. <a href="https://github.com/alecf/heyman/tree/main/evals">Cases and runner</a>.</p>
+
+  <div class="card" id="chart-card">
+    <p class="chart-title">Pass rate by model</p>
+    <p class="chart-sub" id="chart-sub">Loading…</p>
+    <div class="bars" id="bars" role="list"></div>
+    <div class="axis" aria-hidden="true"><span></span><div class="axis-ticks"><span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span></div></div>
+  </div>
+
+  <h3>Summary</h3>
+  <div class="table-wrap"><table id="summary"></table></div>
+  <p class="note" id="summary-note"></p>
+
+  <h3>Every case</h3>
+  <p class="note">Click a row for the commands each model produced, the first failing check and the judge’s verdict.</p>
+  <div class="filters" id="filters" role="group" aria-label="Filter cases"></div>
+  <div class="table-wrap"><table class="matrix" id="matrix"></table></div>
+
+  <footer>
+    <p id="runs"></p>
+    <p>heyman is MIT licensed. <a href="https://github.com/alecf/heyman">github.com/alecf/heyman</a></p>
+  </footer>
+</main>
+<div class="tooltip" id="tooltip" role="tooltip"></div>
+
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, props, ...kids) => {
+    const n = document.createElement(tag);
+    if (props) for (const [k, v] of Object.entries(props)) {
+      if (k === "class") n.className = v; else if (k === "text") n.textContent = v; else n.setAttribute(k, v);
+    }
+    for (const k of kids) if (k != null) n.append(k);
+    return n;
+  };
+  const pct = (p, n) => n ? Math.round((100 * p) / n) + "%" : "–";
+  const short = (m) => m.replace(/^anthropic\//, "").replace(/^ollama\//, "ollama ");
+  const status = (pass) => el("span", { class: "status " + (pass ? "pass" : "fail"), text: pass ? "✓" : "✗", "aria-label": pass ? "pass" : "fail" });
+
+  const tip = $("tooltip");
+  function showTip(evt, nodes) {
+    tip.replaceChildren(...nodes);
+    tip.style.display = "block";
+    const r = tip.getBoundingClientRect();
+    let x, y;
+    if (evt.type === "focus") {
+      const b = evt.target.getBoundingClientRect();
+      x = b.left; y = b.bottom + 8;
+    } else { x = evt.clientX + 14; y = evt.clientY + 14; }
+    x = Math.min(x, window.innerWidth - r.width - 12);
+    if (y + r.height > window.innerHeight - 12) y = Math.max(12, y - r.height - 28);
+    tip.style.left = x + "px"; tip.style.top = y + "px";
+  }
+  const hideTip = () => { tip.style.display = "none"; };
+
+  function render(data) {
+    const models = data.models;
+    // Chart
+    $("chart-sub").textContent = "Share of cases passing all checks · macOS, BSD userland";
+    const bars = $("bars");
+    for (const m of models) {
+      const rate = m.n ? m.pass / m.n : 0;
+      const partial = m.n < data.cases.length;
+      const label = el("div", { class: "bar-label" }, short(m.model), partial ? el("small", { text: m.n + " of " + data.cases.length + " cases" }) : null);
+      const bar = el("div", { class: "bar", tabindex: "0", role: "listitem", "aria-label": `${m.model}: ${pct(m.pass, m.n)} (${m.pass} of ${m.n})` });
+      bar.style.width = (rate * 100) + "%";
+      const value = el("span", { class: "bar-value", text: `${pct(m.pass, m.n)}` });
+      value.style.left = (rate * 100) + "%";
+      if (rate > 0.86) { value.style.left = "auto"; value.style.right = (100 - rate * 100) + "%"; value.style.color = "#fff"; value.style.paddingRight = "8px"; }
+      const track = el("div", { class: "bar-track" }, bar, value);
+      const tipNodes = () => [
+        el("div", { class: "v", text: `${pct(m.pass, m.n)} · ${m.pass}/${m.n}` }),
+        el("div", { class: "k", text: m.model }),
+        el("div", { class: "k", text: `median ${m.latency_p50_s.toFixed(1)}s · ${m.cost_known ? (m.cost_per_case_usd ? "$" + m.cost_per_case_usd.toFixed(3) + " per query" : "free (local)") : "cost unknown"}` }),
+      ];
+      for (const t of ["pointermove", "focus"]) bar.addEventListener(t, (e) => showTip(e, tipNodes()));
+      for (const t of ["pointerleave", "blur"]) bar.addEventListener(t, hideTip);
+      bars.append(label, track);
+    }
+
+    // Summary table
+    const diff = ["easy", "medium", "hard"];
+    const head = ["model", "pass", ...diff, "bsd-gnu", "multi-tool", "-- form", "median latency", "cost / query", "exec", "judge agrees"];
+    const sum = $("summary");
+    sum.append(el("thead", null, el("tr", null, ...head.map((h, i) => el("th", { class: i ? "num" : "", text: h, scope: "col" })))));
+    const tb = el("tbody");
+    const r = (o, k) => o && o[k] ? pct(o[k][0], o[k][1]) : "–";
+    for (const m of models) {
+      const cost = m.cost_known ? (m.cost_per_case_usd ? "$" + m.cost_per_case_usd.toFixed(3) : "free") : "–";
+      const cells = [
+        el("td", { class: "model", text: m.model }),
+        el("td", { class: "num", text: `${pct(m.pass, m.n)} (${m.pass}/${m.n})` }),
+        ...diff.map((d) => el("td", { class: "num", text: r(m.by_difficulty, d) })),
+        el("td", { class: "num", text: r(m.by_tag, "bsd-gnu") }),
+        el("td", { class: "num", text: r(m.by_tag, "multi-tool") }),
+        el("td", { class: "num", text: r(m.by_form, "--") }),
+        el("td", { class: "num", text: m.latency_p50_s.toFixed(1) + "s" }),
+        el("td", { class: "num", text: cost }),
+        el("td", { class: "num", text: m.exec_ran ? `${m.exec_pass}/${m.exec_ran}` : "–" }),
+        el("td", { class: "num", text: m.judged ? pct(m.judge_correct, m.judged) : "–" }),
+      ];
+      tb.append(el("tr", null, ...cells));
+    }
+    sum.append(tb);
+    $("summary-note").textContent = "Cost is list-price API spend per query, including every man-page tool round trip. claude-code runs Claude Code in print mode with its own system prompt, so it is slower and costs more. Partial rows: the local model run was stopped early, and claude-code was run on an 8-case subset.";
+
+    // Matrix
+    const matrix = $("matrix");
+    matrix.append(el("thead", null, el("tr", null,
+      el("th", { scope: "col", text: "request" }),
+      ...models.map((m) => el("th", { scope: "col", class: "num", text: short(m.model) })))));
+    const body = el("tbody");
+    const rows = [];
+    for (const c of data.cases) {
+      const q = el("td", { class: "q" },
+        c.command ? el("code", { text: "heyman " + c.command }) : el("code", { text: "heyman --" }), " ", c.question,
+        el("div", null, ...[c.difficulty, ...c.tags.filter((t) => t !== c.difficulty)].map((t) => el("span", { class: "tag", text: t }))));
+      const cells = models.map((m) => {
+        const res = m.results[c.id];
+        return el("td", { class: "c num" }, res ? status(res.pass) : el("span", { class: "note", text: "–" }));
+      });
+      const tr = el("tr", { tabindex: "0", "aria-expanded": "false" }, q, ...cells);
+      const detail = el("tr", { class: "detail", hidden: "" });
+      const grid = el("div", { class: "detail-grid" },
+        el("div", null, el("strong", { text: "reference  " }), el("code", { text: c.reference })),
+        ...models.filter((m) => m.results[c.id]).map((m) => {
+          const res = m.results[c.id];
+          const why = res.pass ? "" : (res.first_failure || res.error || "");
+          return el("div", null, status(res.pass), " ", el("strong", { text: short(m.model) + "  " }),
+            res.command ? el("code", { text: res.command }) : el("em", { text: "no command" }),
+            why ? el("div", { class: "note", text: "failed: " + why }) : null,
+            res.judge ? el("div", { class: "note", text: `judge: ${res.judge}${res.judge_reason ? " — " + res.judge_reason : ""}` }) : null);
+        }));
+      detail.append(el("td", { colspan: String(models.length + 1) }, grid));
+      const toggle = () => {
+        const open = detail.hidden;
+        detail.hidden = !open;
+        tr.setAttribute("aria-expanded", String(open));
+      };
+      tr.addEventListener("click", toggle);
+      tr.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
+      body.append(tr, detail);
+      rows.push({ c, tr, detail, failedAny: models.some((m) => m.results[c.id] && !m.results[c.id].pass) });
+    }
+    matrix.append(body);
+
+    // Filters
+    const filters = [
+      ["all", () => true], ["bsd-gnu", (r) => r.c.tags.includes("bsd-gnu")], ["multi-tool", (r) => r.c.tags.includes("multi-tool")],
+      ["hard", (r) => r.c.difficulty === "hard"], ["-- form", (r) => !r.c.command], ["any failure", (r) => r.failedAny],
+    ];
+    const fbox = $("filters");
+    const buttons = filters.map(([name, pred], i) => {
+      const b = el("button", { type: "button", "aria-pressed": i === 0 ? "true" : "false", text: name });
+      b.addEventListener("click", () => {
+        buttons.forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+        for (const r of rows) {
+          const show = pred(r);
+          r.tr.hidden = !show;
+          if (!show) { r.detail.hidden = true; r.tr.setAttribute("aria-expanded", "false"); }
+        }
+      });
+      return b;
+    });
+    fbox.append(...buttons);
+
+    $("runs").textContent = "Results generated " + data.generated + " from runs: " +
+      data.runs.map((r) => `${r.dir} (${r.models.join(", ")}; ${r.completed}/${r.planned} attempts at ${r.git_head})`).join("; ") +
+      ". Stored answers are re-graded against the current case file.";
+  }
+
+  fetch("data/evals.json").then((r) => r.json()).then(render).catch((err) => {
+    $("chart-sub").textContent = "Could not load eval data: " + err.message;
+  });
+})();
+</script>
+</body>
+</html>

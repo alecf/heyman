@@ -2,6 +2,8 @@
 
 heyman turns a plain-English request into a shell command. Before answering, the model reads the man pages installed on your machine, so the flags it uses are the ones your system actually has.
 
+Project page and latest eval results: https://alecf.github.io/heyman/
+
 ```console
 $ heyman lsof which process is listening on port 8080
 lsof -i :8080
@@ -228,6 +230,8 @@ heyman only has prices for Anthropic models. Their cost is estimated from list p
 ## Evals
 
 The [`evals/`](evals/) directory has an eval suite that runs a set of requests against one or more models and checks the commands they return. Run it with `go run ./cmd/heyman-eval --models ...` or `make eval`. See [evals/README.md](evals/README.md) for the case format and options.
+
+Latest results (macOS, 50 cases): Claude Haiku 4.5 94%, Claude Sonnet 5.5 98%, local `ministral-3:3b` 28%. Per-case answers are on the [project page](https://alecf.github.io/heyman/#evals); regenerate its data with `make site-data RESULTS="<results dirs>"`.
 
 ## Development
 
