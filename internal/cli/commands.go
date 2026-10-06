@@ -320,7 +320,7 @@ var setupProviders = []setupProvider{
 	{llm.OpenAI, "OpenAI API", "", ""},
 	{llm.OpenRouter, "OpenRouter (many hosted open-weight models)", "", ""},
 	{llm.Google, "Gemini API", "", ""},
-	{llm.Ollama, "local models via Ollama", "qwen3.5:9b", "Make sure Ollama is running (ollama serve) and the model is pulled (ollama pull <model>).\nThinking is turned off (reasoning_effort = \"none\"): it's much faster and just as accurate for heyman.\nOllama may give the model a very large context window; see the README for capping it to save memory."},
+	{llm.Ollama, "local models via Ollama", "qwen3.5:4b", "Make sure Ollama is running (ollama serve) and the model is pulled (ollama pull <model>).\nThinking is turned off (reasoning_effort = \"none\"): it's much faster and just as accurate for heyman.\nOllama may give the model a very large context window; see the README for capping it to save memory."},
 	{llm.OpenAICompat, "any OpenAI-compatible server (llama.cpp, vLLM, LM Studio…)", "", ""},
 }
 

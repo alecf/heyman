@@ -79,6 +79,8 @@ li { margin: 4px 0; }
 .setup dt { color: var(--muted); }
 .setup dd { margin: 0; color: var(--ink); }
 .lat-track { position: relative; height: 26px; border-left: 1px solid var(--axis); background-image: repeating-linear-gradient(to right, var(--grid) 0 1px, transparent 1px 25%); background-size: calc(100% - 1px) 100%; background-repeat: no-repeat; }
+.lat-limit { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed var(--muted); }
+.legend .k-limit { width: 0; height: 12px; border-left: 1px dashed var(--muted); }
 .lat-range { position: absolute; top: 12px; height: 2px; background: var(--series); opacity: 0.45; border-radius: 1px; }
 .lat-p95 { position: absolute; top: 7px; width: 2px; height: 12px; background: var(--series); opacity: 0.6; border-radius: 1px; }
 .lat-dot { position: absolute; top: 8px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: var(--series); box-shadow: 0 0 0 2px var(--surface); cursor: default; outline: none; }
@@ -193,6 +195,7 @@ footer { margin-top: 64px; font-size: 0.85rem; color: var(--muted); }
   <h2 id="evals">Eval results</h2>
   <p>50 requests a developer might type, from <code>lsof</code> one-liners to multi-tool pipelines like “list the size of all files changed in git in the last week.” Eleven are cases where the correct flags differ between macOS and Linux (<code>sed -i ''</code>, <code>stat -f</code>, <code>date -v-1d</code>), which is what reading local man pages is supposed to fix.</p>
   <p>Each answer has to pass regex checks that accept equivalent spellings. Twenty-two cases are also run in a sandbox against a fixture and compared with the reference output. An LLM judge (Claude Sonnet 5.5) gives a second opinion, reported separately. <a href="https://github.com/alecf/heyman/tree/main/evals">Cases and runner</a>.</p>
+  <p><strong>Short version:</strong> for a tool you use interactively, answers need to be right and come back in well under 30 seconds. On this machine only the API models do both. The best local model, <code>gemma4:12b</code>, is nearly as accurate as Haiku but takes about 40 seconds per answer; the local models fast enough to use (<code>qwen3.5:4b</code>, <code>gemma4:e4b</code>, 10–15 seconds) get about half the answers right.</p>
 
   <div class="card">
     <p class="chart-title">Test setup</p>
@@ -208,7 +211,7 @@ footer { margin-top: 64px; font-size: 0.85rem; color: var(--muted); }
   <div class="card">
     <p class="chart-title">Time per answer</p>
     <p class="chart-sub" id="lat-sub">Seconds from request to command, including every man-page lookup.</p>
-    <div class="legend" aria-hidden="true"><span><i class="k-dot"></i>median</span><span><i class="k-line"></i>up to 95th percentile</span></div>
+    <div class="legend" aria-hidden="true"><span><i class="k-dot"></i>median</span><span><i class="k-line"></i>up to 95th percentile</span><span><i class="k-limit"></i>30 seconds</span></div>
     <div class="bars" id="lat-bars" role="list"></div>
   </div>
 
@@ -336,7 +339,9 @@ footer { margin-top: 64px; font-size: 0.85rem; color: var(--muted); }
       ].filter(Boolean);
       for (const t of ["pointermove", "focus"]) dot.addEventListener(t, (e) => showTip(e, tipNodes()));
       for (const t of ["pointerleave", "blur"]) dot.addEventListener(t, hideTip);
-      latBars.append(label, el("div", { class: "lat-track" }, range, p95, dot, value));
+      const limit = el("div", { class: "lat-limit", "aria-hidden": "true" });
+      limit.style.left = x(30) + "%";
+      latBars.append(label, el("div", { class: "lat-track" }, limit, range, p95, dot, value));
     }
     axisRow(latBars, [0, 1, 2, 3, 4].map((t) => t * step + "s"));
 
@@ -366,7 +371,7 @@ footer { margin-top: 64px; font-size: 0.85rem; color: var(--muted); }
       tb.append(el("tr", null, ...cells));
     }
     sum.append(tb);
-    $("summary-note").textContent = "Cost is list-price API spend per query, including every man-page tool round trip. claude-code runs Claude Code in print mode with its own system prompt, so it is slower and costs more. Partial rows: the ministral run was stopped early, and claude-code was run on an 8-case subset. Memory is the peak Ollama reported while the model was loaded.";
+    $("summary-note").textContent = "Cost is list-price API spend per query, including every man-page tool round trip. claude-code runs Claude Code in print mode with its own system prompt, so it is slower and costs more. Partial rows: the ministral run was stopped early, and claude-code was run on an 8-case subset. Memory is the peak resident memory of Ollama's model runner while that model was the only one loaded.";
 
     // Matrix
     const matrix = $("matrix");
