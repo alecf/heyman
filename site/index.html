@@ -160,7 +160,20 @@ footer { margin-top: 64px; font-size: 0.85rem; color: var(--muted); }
       <tr><td><code>claude-code</code></td><td>Install the <code>claude</code> CLI and log in. No API key needed; expect 10s or more per request.</td><td><code>heyman -m claude-code/haiku …</code></td></tr>
     </tbody>
   </table></div>
-  <p>Local models need tool-calling support to read man pages; heyman falls back to a single prompt with the named man page if they don’t have it. To save a choice, run <code>heyman profile setup</code>. <a href="https://github.com/alecf/heyman#models">More on models and configuration</a>.</p>
+  <p>Local models need tool-calling support to read man pages; heyman falls back to a single prompt with the named man page if they don’t have it. <a href="https://github.com/alecf/heyman#models">More on models</a>.</p>
+
+  <h3 id="default">Set a default</h3>
+  <p>Save models as named profiles and pick one as the default, so you don’t need <code>--model</code> on every run. <code>heyman profile setup</code> asks for a provider and model and saves a profile; the first one you create becomes the default.</p>
+<pre><span class="p">$ </span>heyman profile setup
+<span class="p">$ </span>heyman profile list
+<span class="o">* haiku  anthropic  claude-haiku-4-5
+  local  ollama     qwen3:4b</span>
+<span class="p">$ </span>heyman profile set-default local
+<span class="o">Default profile set to: local
+  Provider: ollama
+  Model:    qwen3:4b</span></pre>
+  <p>Use another profile for one run with <code>--profile haiku</code>. <code>heyman profile show</code> and <code>heyman profile delete</code> do what they say. Profiles live in <code>config.toml</code> (<code>~/Library/Application Support/heyman/</code> on macOS, <code>~/.config/heyman/</code> on Linux) if you’d rather edit them by hand; that’s also where a server’s <code>base_url</code> goes.</p>
+  <p class="note">When several are set, the most specific wins: <code>--model</code>, then <code>--profile</code>, then the <code>HEYMAN_MODEL</code> and <code>HEYMAN_PROFILE</code> environment variables, then the default profile, then <code>anthropic/claude-haiku-4-5</code>.</p>
 
   <h2 id="evals">Eval results</h2>
   <p>50 requests a developer might type, from <code>lsof</code> one-liners to multi-tool pipelines like “list the size of all files changed in git in the last week.” Eleven are cases where the correct flags differ between macOS and Linux (<code>sed -i ''</code>, <code>stat -f</code>, <code>date -v-1d</code>), which is what reading local man pages is supposed to fix.</p>
