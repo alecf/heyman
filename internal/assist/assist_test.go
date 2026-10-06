@@ -700,3 +700,17 @@ func TestReadManRepeatAndSubcommandHint(t *testing.T) {
 		t.Errorf("reset should clear lookup history: %q", fresh)
 	}
 }
+
+func TestAnswerToolOffersExplanationOnlyWhenAsked(t *testing.T) {
+	for _, explain := range []bool{false, true} {
+		r := &run{a: (&Assistant{Man: &fakeMan{}}).withDefaults(), req: Request{Explain: explain}, pages: map[string]string{}}
+		params := r.answerTool().Info().Parameters
+		_, has := params["explanation"]
+		if has != explain {
+			t.Errorf("explain=%v: explanation param present=%v (params %v)", explain, has, params)
+		}
+		if _, ok := params["command"]; !ok {
+			t.Errorf("explain=%v: missing command param", explain)
+		}
+	}
+}

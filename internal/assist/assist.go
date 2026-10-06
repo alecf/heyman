@@ -634,28 +634,45 @@ type answerInput struct {
 	Explanation string `json:"explanation,omitempty" description:"Short explanation of what the command does and why these flags"`
 }
 
+// commandOnlyInput is the answer tool's schema when no explanation was
+// requested: offering an explanation field makes models write one anyway,
+// which costs seconds of generation on local models.
+type commandOnlyInput struct {
+	Command string `json:"command" description:"The complete shell command (a pipeline is fine). No markdown, no prompt character."`
+}
+
 func (r *run) answerTool() fantasy.AgentTool {
-	return fantasy.NewAgentTool("answer",
-		"Give the final command. Call this exactly once, when you are done.",
+	const desc = "Give the final command. Call this exactly once, when you are done."
+	if !r.req.Explain {
+		return fantasy.NewAgentTool("answer", desc,
+			func(ctx context.Context, in commandOnlyInput, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+				return r.acceptAnswer(answerInput{Command: in.Command}), nil
+			})
+	}
+	return fantasy.NewAgentTool("answer", desc,
 		func(ctx context.Context, in answerInput, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			if strings.TrimSpace(in.Command) == "" {
-				return fantasy.NewTextErrorResponse("command must not be empty"), nil
-			}
-			if r.req.Explain && strings.TrimSpace(in.Explanation) == "" {
-				r.mu.Lock()
-				r.rejected = &in
-				r.mu.Unlock()
-				return fantasy.NewTextErrorResponse("the user asked for an explanation: call answer again with an explanation"), nil
-			}
-			r.mu.Lock()
-			r.answer = &in
-			r.mu.Unlock()
-			raw, _ := json.Marshal(in)
-			r.record(ToolCall{Tool: "answer", Input: string(raw)})
-			resp := fantasy.NewTextResponse("ok")
-			resp.StopTurn = true
-			return resp, nil
+			return r.acceptAnswer(in), nil
 		})
+}
+
+func (r *run) acceptAnswer(in answerInput) fantasy.ToolResponse {
+	if strings.TrimSpace(in.Command) == "" {
+		return fantasy.NewTextErrorResponse("command must not be empty")
+	}
+	if r.req.Explain && strings.TrimSpace(in.Explanation) == "" {
+		r.mu.Lock()
+		r.rejected = &in
+		r.mu.Unlock()
+		return fantasy.NewTextErrorResponse("the user asked for an explanation: call answer again with an explanation")
+	}
+	r.mu.Lock()
+	r.answer = &in
+	r.mu.Unlock()
+	raw, _ := json.Marshal(in)
+	r.record(ToolCall{Tool: "answer", Input: string(raw)})
+	resp := fantasy.NewTextResponse("ok")
+	resp.StopTurn = true
+	return resp
 }
 
 // --- prompts ---
