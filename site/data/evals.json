@@ -13,7 +13,13 @@
    "completed": 146,
    "planned": 150,
    "interrupted": true,
-   "judge": "anthropic/claude-sonnet-5-5"
+   "judge": "anthropic/claude-sonnet-5-5",
+   "hardware": {
+    "cpu": "Apple M2 Max",
+    "memory_gb": 32,
+    "os": "macOS 26.6.2 (darwin/arm64, BSD userland)"
+   },
+   "ollama_version": "0.33.1"
   },
   {
    "dir": "claude-code-subset-20261005",
@@ -25,7 +31,12 @@
    "completed": 8,
    "planned": 8,
    "interrupted": false,
-   "judge": "anthropic/claude-sonnet-5-5"
+   "judge": "anthropic/claude-sonnet-5-5",
+   "hardware": {
+    "cpu": "Apple M2 Max",
+    "memory_gb": 32,
+    "os": "macOS 26.6.2 (darwin/arm64, BSD userland)"
+   }
   },
   {
    "dir": "site-local-qwen3-5-9b",
@@ -37,7 +48,14 @@
    "completed": 50,
    "planned": 50,
    "interrupted": false,
-   "judge": "anthropic/claude-sonnet-5-5"
+   "judge": "anthropic/claude-sonnet-5-5",
+   "hardware": {
+    "cpu": "Apple M2 Max",
+    "memory_gb": 32,
+    "os": "macOS 26.6.2 (darwin/arm64, BSD userland)"
+   },
+   "ollama_version": "0.33.1",
+   "reasoning_effort": "none"
   },
   {
    "dir": "site-local-qwen3-5-4b",
@@ -49,7 +67,14 @@
    "completed": 50,
    "planned": 50,
    "interrupted": false,
-   "judge": "anthropic/claude-sonnet-5-5"
+   "judge": "anthropic/claude-sonnet-5-5",
+   "hardware": {
+    "cpu": "Apple M2 Max",
+    "memory_gb": 32,
+    "os": "macOS 26.6.2 (darwin/arm64, BSD userland)"
+   },
+   "ollama_version": "0.33.1",
+   "reasoning_effort": "none"
   }
  ],
  "models": [
@@ -272,6 +297,7 @@
     ]
    },
    "errors": 0,
+   "latency_avg_s": 4.94742,
    "latency_p50_s": 3.114,
    "latency_p95_s": 13.11,
    "avg_tool_calls": 1.54,
@@ -586,7 +612,9 @@
      "judge": "correct",
      "judge_reason": "`zip -r docs.zip docs` recursively adds the docs folder and all its contents to docs.zip, which is the same as the first reference answer and works with macOS's zip."
     }
-   }
+   },
+   "run": "full-20261005",
+   "local": false
   },
   {
    "model": "anthropic/claude-sonnet-5-5",
@@ -807,6 +835,7 @@
     ]
    },
    "errors": 0,
+   "latency_avg_s": 3.461620000000001,
    "latency_p50_s": 2.758,
    "latency_p95_s": 6.092,
    "avg_tool_calls": 0.08,
@@ -1119,7 +1148,9 @@
      "judge": "correct",
      "judge_reason": "`zip -r docs.zip docs` recursively adds the docs folder and all its contents to docs.zip. It is identical to the first reference answer and works with macOS's zip."
     }
-   }
+   },
+   "run": "full-20261005",
+   "local": false
   },
   {
    "model": "ollama/ministral-3:3b",
@@ -1324,6 +1355,7 @@
     ]
    },
    "errors": 4,
+   "latency_avg_s": 36.75432608695652,
    "latency_p50_s": 20.3,
    "latency_p95_s": 143.783,
    "avg_tool_calls": 1.5434782608695652,
@@ -1636,7 +1668,9 @@
      "judge": "incorrect",
      "judge_reason": "Without the -r flag, zip only stores the empty directory entry 'docs/' and does not recurse into it, so the folder's contents are not included."
     }
-   }
+   },
+   "run": "full-20261005",
+   "local": true
   },
   {
    "model": "claude-code/haiku",
@@ -1733,6 +1767,7 @@
     ]
    },
    "errors": 0,
+   "latency_avg_s": 18.334374999999998,
    "latency_p50_s": 11.932,
    "latency_p95_s": 31.758,
    "avg_tool_calls": 0,
@@ -1793,7 +1828,9 @@
      "judge": "incorrect",
      "judge_reason": "Without `-n 1` (or `-n`/`-L`), BSD xargs packs all filenames into a single gzip invocation, so `-P 4` has nothing to parallelize. The files are gzipped sequentially by one process rather than 4 in parallel."
     }
-   }
+   },
+   "run": "claude-code-subset-20261005",
+   "local": false
   },
   {
    "model": "ollama/qwen3.5:9b",
@@ -2014,6 +2051,7 @@
     ]
    },
    "errors": 0,
+   "latency_avg_s": 35.38470000000001,
    "latency_p50_s": 23.035,
    "latency_p95_s": 87.222,
    "avg_tool_calls": 2.08,
@@ -2337,7 +2375,12 @@
      "judge": "correct",
      "judge_reason": "`zip -r docs.zip docs` recursively adds the docs folder and all its contents to docs.zip, and it is identical to the first reference answer. The command is valid on macOS."
     }
-   }
+   },
+   "run": "site-local-qwen3-5-9b",
+   "local": true,
+   "memory_gb": 6.7,
+   "context": 32768,
+   "reasoning_effort": "none"
   },
   {
    "model": "ollama/qwen3.5:4b",
@@ -2558,6 +2601,7 @@
     ]
    },
    "errors": 1,
+   "latency_avg_s": 16.870660000000008,
    "latency_p50_s": 13.3,
    "latency_p95_s": 40.806,
    "avg_tool_calls": 2.14,
@@ -2888,7 +2932,12 @@
      "judge": "correct",
      "judge_reason": "The command `zip -r docs.zip docs` recursively adds the docs folder and all its contents to docs.zip. It is identical to the first reference answer and works with macOS's zip."
     }
-   }
+   },
+   "run": "site-local-qwen3-5-4b",
+   "local": true,
+   "memory_gb": 4.3,
+   "context": 32768,
+   "reasoning_effort": "none"
   }
  ],
  "cases": [

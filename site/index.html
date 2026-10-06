@@ -75,7 +75,21 @@ li { margin: 4px 0; }
 .bar:focus-visible { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--series); }
 .bar-value { position: absolute; top: 50%; transform: translateY(-50%); font: 600 0.85rem var(--sans); color: var(--ink); white-space: nowrap; padding-left: 8px; pointer-events: none; }
 .axis { display: grid; grid-template-columns: minmax(120px, max-content) 1fr; gap: 14px; margin-top: 6px; }
-.axis-ticks { display: flex; justify-content: space-between; font-size: 0.72rem; color: var(--muted); }
+.setup { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 0.9rem; }
+.setup dt { color: var(--muted); }
+.setup dd { margin: 0; color: var(--ink); }
+.lat-track { position: relative; height: 26px; border-left: 1px solid var(--axis); background-image: repeating-linear-gradient(to right, var(--grid) 0 1px, transparent 1px 25%); background-size: calc(100% - 1px) 100%; background-repeat: no-repeat; }
+.lat-range { position: absolute; top: 12px; height: 2px; background: var(--series); opacity: 0.45; border-radius: 1px; }
+.lat-p95 { position: absolute; top: 7px; width: 2px; height: 12px; background: var(--series); opacity: 0.6; border-radius: 1px; }
+.lat-dot { position: absolute; top: 8px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: var(--series); box-shadow: 0 0 0 2px var(--surface); cursor: default; outline: none; }
+.lat-dot:hover, .lat-dot:focus-visible { background: var(--series-hover); }
+.lat-dot:focus-visible { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--series); }
+.lat-value { position: absolute; top: 50%; transform: translateY(-50%); font: 600 0.8rem var(--sans); color: var(--ink); white-space: nowrap; padding-left: 8px; pointer-events: none; }
+.legend { display: flex; gap: 16px; font-size: 0.78rem; color: var(--ink-2); margin: 0 0 14px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend .k-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--series); }
+.legend .k-line { width: 18px; height: 2px; background: var(--series); opacity: 0.45; }
+.axis-ticks { margin-top: -4px; display: flex; justify-content: space-between; font-size: 0.72rem; color: var(--muted); }
 .tooltip { position: fixed; z-index: 10; pointer-events: none; background: var(--surface); color: var(--ink); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 0.82rem; box-shadow: 0 4px 16px rgba(0,0,0,0.15); max-width: min(420px, calc(100vw - 32px)); display: none; }
 .tooltip .v { font-weight: 700; font-size: 0.95rem; }
 .tooltip .k { color: var(--ink-2); }
@@ -179,11 +193,22 @@ footer { margin-top: 64px; font-size: 0.85rem; color: var(--muted); }
   <p>50 requests a developer might type, from <code>lsof</code> one-liners to multi-tool pipelines like “list the size of all files changed in git in the last week.” Eleven are cases where the correct flags differ between macOS and Linux (<code>sed -i ''</code>, <code>stat -f</code>, <code>date -v-1d</code>), which is what reading local man pages is supposed to fix.</p>
   <p>Each answer has to pass regex checks that accept equivalent spellings. Twenty-two cases are also run in a sandbox against a fixture and compared with the reference output. An LLM judge (Claude Sonnet 5.5) gives a second opinion, reported separately. <a href="https://github.com/alecf/heyman/tree/main/evals">Cases and runner</a>.</p>
 
+  <div class="card">
+    <p class="chart-title">Test setup</p>
+    <dl class="setup" id="setup"></dl>
+  </div>
+
   <div class="card" id="chart-card">
     <p class="chart-title">Pass rate by model</p>
     <p class="chart-sub" id="chart-sub">Loading…</p>
     <div class="bars" id="bars" role="list"></div>
-    <div class="axis" aria-hidden="true"><span></span><div class="axis-ticks"><span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span></div></div>
+  </div>
+
+  <div class="card">
+    <p class="chart-title">Time per answer</p>
+    <p class="chart-sub" id="lat-sub">Seconds from request to command, including every man-page lookup.</p>
+    <div class="legend" aria-hidden="true"><span><i class="k-dot"></i>median</span><span><i class="k-line"></i>up to 95th percentile</span></div>
+    <div class="bars" id="lat-bars" role="list"></div>
   </div>
 
   <h3>Summary</h3>
@@ -217,6 +242,11 @@ footer { margin-top: 64px; font-size: 0.85rem; color: var(--muted); }
   const pct = (p, n) => n ? Math.round((100 * p) / n) + "%" : "–";
   const short = (m) => m.replace(/^anthropic\//, "").replace(/^ollama\//, "ollama ");
   const status = (pass) => el("span", { class: "status " + (pass ? "pass" : "fail"), text: pass ? "✓" : "✗", "aria-label": pass ? "pass" : "fail" });
+
+  // Axis row lives in the same grid as the bars so the columns line up.
+  function axisRow(grid, labels) {
+    grid.append(el("span", { "aria-hidden": "true" }), el("div", { class: "axis-ticks", "aria-hidden": "true" }, ...labels.map((t) => el("span", { text: t }))));
+  }
 
   const tip = $("tooltip");
   function showTip(evt, nodes) {
@@ -259,10 +289,57 @@ footer { margin-top: 64px; font-size: 0.85rem; color: var(--muted); }
       for (const t of ["pointerleave", "blur"]) bar.addEventListener(t, hideTip);
       bars.append(label, track);
     }
+    axisRow(bars, ["0%", "25%", "50%", "75%", "100%"]);
+
+    // Test setup
+    const run0 = data.runs.find((r) => r.hardware && r.hardware.cpu) || {};
+    const hw = run0.hardware || {};
+    const ollama = (data.runs.find((r) => r.ollama_version) || {}).ollama_version;
+    const local = models.filter((m) => m.local && m.memory_gb != null);
+    const setupRows = [
+      ["Machine", [hw.cpu, hw.memory_gb ? Math.round(hw.memory_gb) + " GB RAM" : ""].filter(Boolean).join(", ") || "–"],
+      ["OS", hw.os || "–"],
+      ["API models", "Called over the network from this machine; latency includes the round trips."],
+      ["Local models", ollama
+        ? `Ollama ${ollama}, on the same machine. ` + local.map((m) => `${short(m.model)}: ${m.memory_gb.toFixed(1)} GB, ${m.context ? Math.round(m.context / 1024) + "K context" : ""}${m.reasoning_effort === "none" ? ", thinking off" : ""}`).join("; ") + "."
+        : "–"],
+    ];
+    $("setup").append(...setupRows.flatMap(([k, v]) => [el("dt", { text: k }), el("dd", { text: v })]));
+
+    // Latency: median dot, line to p95. Fastest first.
+    const byLat = models.slice().sort((a, b) => a.latency_p50_s - b.latency_p50_s);
+    const maxS = Math.max(...byLat.map((m) => m.latency_p95_s));
+    // Four equal, round intervals so ticks match the 25% gridlines.
+    const step = [1, 2, 5, 10, 15, 20, 25, 30, 40, 50, 60, 75, 100].find((v) => 4 * v >= maxS) || Math.ceil(maxS / 400) * 100;
+    const axisMax = 4 * step;
+    const x = (v) => (100 * v) / axisMax;
+    const latBars = $("lat-bars");
+    for (const m of byLat) {
+      const label = el("div", { class: "bar-label" }, short(m.model), el("small", { text: m.local ? "local" + (m.memory_gb != null ? " · " + m.memory_gb.toFixed(1) + " GB" : "") : m.model.startsWith("claude-code/") ? "API via claude CLI" : "API" }));
+      const range = el("div", { class: "lat-range" });
+      range.style.left = x(m.latency_p50_s) + "%";
+      range.style.width = Math.max(0, x(m.latency_p95_s) - x(m.latency_p50_s)) + "%";
+      const p95 = el("div", { class: "lat-p95" });
+      p95.style.left = `calc(${x(m.latency_p95_s)}% - 1px)`;
+      const dot = el("div", { class: "lat-dot", tabindex: "0", role: "listitem", "aria-label": `${m.model}: median ${m.latency_p50_s.toFixed(1)} seconds, 95th percentile ${m.latency_p95_s.toFixed(1)} seconds` });
+      dot.style.left = x(m.latency_p50_s) + "%";
+      const value = el("span", { class: "lat-value", text: `${m.latency_p50_s.toFixed(1)}s · p95 ${Math.round(m.latency_p95_s)}s` });
+      value.style.left = x(m.latency_p95_s) + "%";
+      const tipNodes = () => [
+        el("div", { class: "v", text: `${m.latency_p50_s.toFixed(1)}s median` }),
+        el("div", { class: "k", text: m.model }),
+        el("div", { class: "k", text: `average ${m.latency_avg_s.toFixed(1)}s · 95th percentile ${m.latency_p95_s.toFixed(1)}s` }),
+        m.memory_gb != null ? el("div", { class: "k", text: `${m.memory_gb.toFixed(1)} GB in memory${m.context ? ", " + Math.round(m.context / 1024) + "K context" : ""}` }) : null,
+      ].filter(Boolean);
+      for (const t of ["pointermove", "focus"]) dot.addEventListener(t, (e) => showTip(e, tipNodes()));
+      for (const t of ["pointerleave", "blur"]) dot.addEventListener(t, hideTip);
+      latBars.append(label, el("div", { class: "lat-track" }, range, p95, dot, value));
+    }
+    axisRow(latBars, [0, 1, 2, 3, 4].map((t) => t * step + "s"));
 
     // Summary table
     const diff = ["easy", "medium", "hard"];
-    const head = ["model", "pass", ...diff, "bsd-gnu", "multi-tool", "-- form", "median latency", "cost / query", "exec", "judge agrees"];
+    const head = ["model", "pass", ...diff, "bsd-gnu", "multi-tool", "-- form", "median", "p95", "memory", "cost / query", "exec", "judge agrees"];
     const sum = $("summary");
     sum.append(el("thead", null, el("tr", null, ...head.map((h, i) => el("th", { class: i ? "num" : "", text: h, scope: "col" })))));
     const tb = el("tbody");
@@ -277,6 +354,8 @@ footer { margin-top: 64px; font-size: 0.85rem; color: var(--muted); }
         el("td", { class: "num", text: r(m.by_tag, "multi-tool") }),
         el("td", { class: "num", text: r(m.by_form, "--") }),
         el("td", { class: "num", text: m.latency_p50_s.toFixed(1) + "s" }),
+        el("td", { class: "num", text: m.latency_p95_s.toFixed(1) + "s" }),
+        el("td", { class: "num", text: m.memory_gb != null ? m.memory_gb.toFixed(1) + " GB" : (m.local ? "–" : "n/a") }),
         el("td", { class: "num", text: cost }),
         el("td", { class: "num", text: m.exec_ran ? `${m.exec_pass}/${m.exec_ran}` : "–" }),
         el("td", { class: "num", text: m.judged ? pct(m.judge_correct, m.judged) : "–" }),
@@ -284,7 +363,7 @@ footer { margin-top: 64px; font-size: 0.85rem; color: var(--muted); }
       tb.append(el("tr", null, ...cells));
     }
     sum.append(tb);
-    $("summary-note").textContent = "Cost is list-price API spend per query, including every man-page tool round trip. claude-code runs Claude Code in print mode with its own system prompt, so it is slower and costs more. Partial rows: the ministral run was stopped early, and claude-code was run on an 8-case subset. Local models ran on an M2 Max (32 GB) through Ollama with thinking off (--reasoning-effort none) and a 32K context window: qwen3.5:9b used 6.7 GB, qwen3.5:4b 4.3 GB.";
+    $("summary-note").textContent = "Cost is list-price API spend per query, including every man-page tool round trip. claude-code runs Claude Code in print mode with its own system prompt, so it is slower and costs more. Partial rows: the ministral run was stopped early, and claude-code was run on an 8-case subset. Memory is the peak Ollama reported while the model was loaded.";
 
     // Matrix
     const matrix = $("matrix");
