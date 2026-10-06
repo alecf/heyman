@@ -43,6 +43,10 @@ type Attempt struct {
 	ConsultedExtra bool         `json:"consulted_extra_man_page"`
 	Usage          assist.Usage `json:"usage"`
 	CostUSD        *float64     `json:"cost_usd"`
+
+	// Model's final reply when no command could be extracted.
+	RawText      string `json:"raw_text,omitempty"`
+	RawReasoning string `json:"raw_reasoning,omitempty"`
 }
 
 // Scored reports whether the attempt counts toward pass rates.
@@ -314,6 +318,7 @@ func (r *runner) attempt(ctx context.Context, j job) Attempt {
 		a.ToolCalls = res.ToolCalls
 		a.ManPages = res.ManPages
 		a.Usage = res.Usage
+		a.RawText, a.RawReasoning = res.RawText, res.RawReasoning
 		for _, p := range res.ManPages {
 			if c.Command == "" || (p != c.Command && p != pageKey(c.Command, c.Section)) {
 				a.ConsultedExtra = true

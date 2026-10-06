@@ -266,3 +266,21 @@ func TestErrNoRequestIsSentinel(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+func TestReasoningEffortPrecedence(t *testing.T) {
+	cfg := &config.Config{Profiles: map[string]config.Profile{"q": {Provider: "ollama", Model: "qwen3.5:4b", ReasoningEffort: "low"}}}
+	t.Setenv("HEYMAN_REASONING_EFFORT", "")
+	if got := reasoningEffort(&rootFlags{}, cfg, "profile q"); got != "low" {
+		t.Errorf("profile: got %q", got)
+	}
+	if got := reasoningEffort(&rootFlags{}, cfg, "--model"); got != "" {
+		t.Errorf("--model without flag: got %q", got)
+	}
+	t.Setenv("HEYMAN_REASONING_EFFORT", "medium")
+	if got := reasoningEffort(&rootFlags{}, cfg, "profile q"); got != "medium" {
+		t.Errorf("env: got %q", got)
+	}
+	if got := reasoningEffort(&rootFlags{reasoningEffort: "none"}, cfg, "profile q"); got != "none" {
+		t.Errorf("flag: got %q", got)
+	}
+}

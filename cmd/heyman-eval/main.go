@@ -46,6 +46,7 @@ func run() int {
 		selfTest  = flag.Bool("self-test", false, "grade the references instead of calling models")
 		list      = flag.Bool("list", false, "list matching cases and exit")
 		exportTo  = flag.String("export-site", "", "write a site JSON snapshot of the result dirs given as arguments (re-graded with the current cases; no model calls) and exit")
+		effort    = flag.String("reasoning-effort", "", "reasoning effort for ollama/openai-compat models (none disables thinking)")
 		gradeCmd  = flag.String("grade", "", "grade this command against the matching cases (deterministic checks; exec too with --exec) and exit")
 	)
 	flag.Parse()
@@ -196,7 +197,7 @@ func run() int {
 		Judge:    j,
 		MaxCost:  *maxCost,
 		NewAnswerer: func(ctx context.Context, model string) (assist.Answerer, llm.Spec, error) {
-			return assist.New(ctx, assist.Config{Model: model, Man: man})
+			return assist.New(ctx, assist.Config{Model: model, Man: man, ReasoningEffort: *effort})
 		},
 		Results:  lineWriter,
 		Progress: os.Stderr,

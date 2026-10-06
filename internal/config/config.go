@@ -27,6 +27,9 @@ type Profile struct {
 	// BaseURL overrides the provider endpoint (required for openai-compat,
 	// optional for ollama and proxies).
 	BaseURL string `toml:"base_url,omitempty"`
+	// ReasoningEffort is sent to ollama / openai-compat thinking models:
+	// "none" turns thinking off (much faster), or "low" / "medium" / "high".
+	ReasoningEffort string `toml:"reasoning_effort,omitempty"`
 	// ContextWindow is deprecated and ignored; kept so old configs still load.
 	ContextWindow int            `toml:"context_window,omitempty"`
 	Options       map[string]any `toml:"options,omitempty"`

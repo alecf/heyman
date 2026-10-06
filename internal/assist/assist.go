@@ -16,6 +16,8 @@ import (
 	"unicode/utf8"
 
 	"charm.land/fantasy"
+	"charm.land/fantasy/providers/openai"
+	"charm.land/fantasy/providers/openaicompat"
 	"github.com/alecf/heyman/internal/manpage"
 )
 
@@ -65,6 +67,10 @@ type Result struct {
 	// produced (e.g. the named command had no man page, or tool calling was
 	// unsupported and heyman fell back to a single prompt).
 	Notes []string `json:"notes,omitempty"`
+	// RawText and RawReasoning hold the model's final reply when no command
+	// could be extracted, for --debug and eval traces.
+	RawText      string `json:"raw_text,omitempty"`
+	RawReasoning string `json:"raw_reasoning,omitempty"`
 	// CostUSD is set by providers that report cost themselves (claude-code).
 	CostUSD *float64 `json:"cost_usd,omitempty"`
 }
@@ -104,6 +110,9 @@ type Assistant struct {
 	// NoTools disables tool calling (for models that don't support it). The
 	// named command's man page is still preloaded.
 	NoTools bool
+	// ReasoningEffort ("none", "low", "medium", "high") is sent to ollama and
+	// openai-compat servers that support it; "none" turns thinking off.
+	ReasoningEffort string
 
 	OnEvent func(Event)
 	eventMu sync.Mutex
@@ -131,6 +140,7 @@ func (a *Assistant) withDefaults() *Assistant {
 		PageChars:       a.PageChars,
 		MaxOutputTokens: a.MaxOutputTokens,
 		NoTools:         a.NoTools,
+		ReasoningEffort: a.ReasoningEffort,
 		OnEvent:         a.OnEvent,
 	}
 	c.defaults()
@@ -324,7 +334,11 @@ func (r *run) generate(ctx context.Context, preload string, withTools bool) (*Re
 	}
 	agent := fantasy.NewAgent(a.Model, opts...)
 
-	out, err := agent.Generate(ctx, fantasy.AgentCall{Prompt: userPrompt(r.req)})
+	call := fantasy.AgentCall{Prompt: userPrompt(r.req)}
+	if po := reasoningOptions(a.Model, a.ReasoningEffort); po != nil {
+		call.ProviderOptions = po
+	}
+	out, err := agent.Generate(ctx, call)
 	if err != nil {
 		return nil, err
 	}
@@ -354,6 +368,17 @@ func (r *run) generate(ctx context.Context, preload string, withTools bool) (*Re
 		// No accepted answer call: parse the final text (models that reply
 		// in prose, or the no-tools fallback).
 		res.Command, res.Explanation = ParseText(out.Response.Content.Text())
+		if res.Command == "" {
+			// Some local models (e.g. Qwen 3.5 via Ollama) occasionally write
+			// their answer tool call as markup inside the reply or the
+			// reasoning instead of as a real tool call.
+			for _, t := range []string{out.Response.Content.Text(), out.Response.Content.ReasoningText()} {
+				if cmd, expl, ok := answerFromMarkup(t); ok {
+					res.Command, res.Explanation = cmd, expl
+					break
+				}
+			}
+		}
 		if res.Command == "" && rejected != nil {
 			// The model answered without the requested explanation and
 			// never retried; a command without explanation beats nothing.
@@ -364,9 +389,83 @@ func (r *run) generate(ctx context.Context, preload string, withTools bool) (*Re
 		res.Explanation = ""
 	}
 	if res.Command == "" {
+		res.RawText = truncateRunes(out.Response.Content.Text(), 4000)
+		res.RawReasoning = truncateRunes(out.Response.Content.ReasoningText(), 4000)
 		return res, ErrNoCommand
 	}
 	return res, nil
+}
+
+var (
+	// <function=answer> <parameter=command>…</parameter> (Qwen XML style).
+	xmlAnswerCall = regexp.MustCompile(`(?s)<function=answer>(.*?)(?:</function>|</tool_call>|$)`)
+	xmlParam      = regexp.MustCompile(`(?s)<parameter=(command|explanation)>\s*(.*?)\s*(?:</parameter>|<parameter=|</function>|</tool_call>|$)`)
+	// <tool_call>{"name": "answer", "arguments": {...}}</tool_call> (JSON style).
+	jsonToolCall = regexp.MustCompile(`(?s)<tool_call>\s*(\{.*?\})\s*</tool_call>`)
+	// A tool call whose opening tags were lost: the text ends with a
+	// parameter value followed by </parameter></function></tool_call>.
+	danglingCall = regexp.MustCompile("(?s)(?:```[a-zA-Z]*\\s*\n|\n\n)([^`]*?)\\s*</parameter>\\s*</function>\\s*</tool_call>\\s*$")
+	// A final sentence such as "So the command is: `stat -f %m notes.txt`".
+	finalCommandLine = regexp.MustCompile("(?i)(?:^|\n)[^\n]*\\b(?:final |the )?command (?:is|would be|to run is)\\s*:?\\s*`([^`\n]+)`\\.?\\s*$")
+)
+
+// answerFromMarkup recovers an `answer` tool call that a model wrote as text
+// rather than emitting it as a structured tool call. Only explicit answer
+// calls are accepted; draft commands in free-form reasoning are not.
+func answerFromMarkup(text string) (command, explanation string, ok bool) {
+	if m := xmlAnswerCall.FindAllStringSubmatch(text, -1); len(m) > 0 {
+		body := m[len(m)-1][1]
+		for _, p := range xmlParam.FindAllStringSubmatch(body, -1) {
+			switch p[1] {
+			case "command":
+				command = cleanCommand(p[2])
+			case "explanation":
+				explanation = strings.TrimSpace(p[2])
+			}
+		}
+		if command != "" {
+			return command, explanation, true
+		}
+	}
+	for _, m := range jsonToolCall.FindAllStringSubmatch(text, -1) {
+		var call struct {
+			Name      string      `json:"name"`
+			Arguments answerInput `json:"arguments"`
+		}
+		if json.Unmarshal([]byte(m[1]), &call) == nil && call.Name == "answer" && strings.TrimSpace(call.Arguments.Command) != "" {
+			command, explanation = cleanCommand(call.Arguments.Command), strings.TrimSpace(call.Arguments.Explanation)
+		}
+	}
+	if command == "" {
+		if m := danglingCall.FindStringSubmatch(text); m != nil {
+			command = cleanCommand(m[1])
+		} else if m := finalCommandLine.FindStringSubmatch(strings.TrimSpace(text)); m != nil {
+			command = cleanCommand(m[1])
+		}
+	}
+	return command, explanation, command != ""
+}
+
+// reasoningOptions builds provider options carrying a reasoning effort for
+// OpenAI-compatible local servers. Other providers are left alone.
+func reasoningOptions(m fantasy.LanguageModel, effort string) fantasy.ProviderOptions {
+	if effort == "" || m == nil {
+		return nil
+	}
+	switch p := m.Provider(); p {
+	case "ollama", openaicompat.Name:
+		e := openai.ReasoningEffort(effort)
+		return fantasy.ProviderOptions{p: &openaicompat.ProviderOptions{ReasoningEffort: &e}}
+	}
+	return nil
+}
+
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
 }
 
 // --- tools ---
