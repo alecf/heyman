@@ -389,6 +389,8 @@ func exportSite(cases []*eval.Case, out string, dirs []string, aliases map[strin
 
 // keepAwake prevents idle and system sleep for the life of this process
 // (macOS caffeinate). It returns a description, or "" if unavailable.
+// caffeinate is restarted if something else kills it (some keep-awake
+// utilities replace other caffeinate processes).
 func keepAwake() string {
 	if runtime.GOOS != "darwin" {
 		return ""
@@ -398,10 +400,21 @@ func keepAwake() string {
 		return ""
 	}
 	// -w: exit when this process exits, so nothing is left behind.
-	cmd := exec.Command(path, "-i", "-s", "-m", "-w", strconv.Itoa(os.Getpid()))
-	if err := cmd.Start(); err != nil {
+	args := []string{"-i", "-s", "-m", "-w", strconv.Itoa(os.Getpid())}
+	first := exec.Command(path, args...)
+	if err := first.Start(); err != nil {
 		return ""
 	}
-	go func() { _ = cmd.Wait() }()
+	go func() {
+		cmd := first
+		for {
+			_ = cmd.Wait()
+			time.Sleep(time.Second)
+			cmd = exec.Command(path, args...)
+			if cmd.Start() != nil {
+				return
+			}
+		}
+	}()
 	return "caffeinate -i -s -m"
 }
