@@ -49,6 +49,8 @@ func run() int {
 		list      = flag.Bool("list", false, "list matching cases and exit")
 		aliases   = flag.String("alias", "", "with --export-site: rename models, e.g. ollama/hm-gemma4-12b:32k=ollama/gemma4:12b,…")
 		exportTo  = flag.String("export-site", "", "write a site JSON snapshot of the result dirs given as arguments (re-graded with the current cases; no model calls) and exit")
+		preload   = flag.Int("preload-chars", 0, "characters of the named man page to preload (0 = heyman default)")
+		pageChars = flag.Int("page-chars", 0, "max characters per man() tool result (0 = heyman default)")
 		effort    = flag.String("reasoning-effort", "", "reasoning effort for ollama/openai-compat models (none disables thinking)")
 		gradeCmd  = flag.String("grade", "", "grade this command against the matching cases (deterministic checks; exec too with --exec) and exit")
 	)
@@ -177,22 +179,24 @@ func run() int {
 	lineWriter := &flushWriter{w: results}
 
 	meta := map[string]any{
-		"started":  time.Now().UTC().Format(time.RFC3339),
-		"cases":    *casesPath,
-		"filter":   *filter,
-		"n_cases":  len(cases),
-		"models":   modelList,
-		"repeat":   *repeat,
-		"parallel": *parallel,
-		"timeout":  timeout.String(),
-		"exec":     *doExec,
-		"judge":    *judge,
-		"max_cost": *maxCost,
-		"os":       eval.OSDescription(),
-		"hardware": eval.DetectHardware(),
-		"git_head": gitHead(),
-		"go":       runtime.Version(),
-		"command":  strings.Join(os.Args, " "),
+		"started":       time.Now().UTC().Format(time.RFC3339),
+		"cases":         *casesPath,
+		"filter":        *filter,
+		"n_cases":       len(cases),
+		"models":        modelList,
+		"repeat":        *repeat,
+		"parallel":      *parallel,
+		"timeout":       timeout.String(),
+		"exec":          *doExec,
+		"judge":         *judge,
+		"max_cost":      *maxCost,
+		"os":            eval.OSDescription(),
+		"preload_chars": *preload,
+		"page_chars":    *pageChars,
+		"hardware":      eval.DetectHardware(),
+		"git_head":      gitHead(),
+		"go":            runtime.Version(),
+		"command":       strings.Join(os.Args, " "),
 	}
 
 	fmt.Fprintf(os.Stderr, "heyman-eval: %d cases × %d models × %d repeats → %s\n", len(cases), len(modelList), *repeat, dir)
@@ -243,7 +247,7 @@ func run() int {
 			return err
 		},
 		NewAnswerer: func(ctx context.Context, model string) (assist.Answerer, llm.Spec, error) {
-			return assist.New(ctx, assist.Config{Model: model, Man: man, ReasoningEffort: *effort})
+			return assist.New(ctx, assist.Config{Model: model, Man: man, ReasoningEffort: *effort, PreloadChars: *preload, PageChars: *pageChars})
 		},
 		Results:  lineWriter,
 		Progress: os.Stderr,

@@ -14,8 +14,13 @@ type Config struct {
 	// ReasoningEffort is passed to ollama / openai-compat models ("none"
 	// disables thinking).
 	ReasoningEffort string
-	Man             ManSource
-	OnEvent         func(Event)
+	// PreloadChars and PageChars override how much man page text is put in
+	// the prompt up front and returned per man() call (0 = defaults).
+	// Local models spend most of their time reading the prompt, so smaller
+	// values make them much faster.
+	PreloadChars, PageChars int
+	Man                     ManSource
+	OnEvent                 func(Event)
 }
 
 // New returns an Answerer for cfg.Model: a fantasy-backed Assistant for API
@@ -46,6 +51,8 @@ func New(ctx context.Context, cfg Config) (Answerer, llm.Spec, error) {
 		OnEvent:   cfg.OnEvent,
 
 		ReasoningEffort: cfg.ReasoningEffort,
+		PreloadChars:    cfg.PreloadChars,
+		PageChars:       cfg.PageChars,
 	}, spec, nil
 }
 
