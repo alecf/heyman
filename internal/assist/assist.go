@@ -194,7 +194,21 @@ func (a *Assistant) Ask(ctx context.Context, req Request) (*Result, error) {
 		run.note("this model does not support tool calling; answered without reading man pages")
 		res, err = run.generate(ctx, preload, false)
 	}
+	if errors.Is(err, ErrNoCommand) && a.ReasoningEffort != "" && emptyReply(res) {
+		// Some models (e.g. gemma4:e4b) return nothing at all when asked
+		// not to think. Retry once with the model's default.
+		run.reset()
+		run.note(fmt.Sprintf("empty reply with reasoning effort %q; retried with the model's default", a.ReasoningEffort))
+		a.ReasoningEffort = "" // a is this call's private copy
+		res, err = run.generate(ctx, preload, !a.NoTools)
+	}
 	return res, err
+}
+
+// emptyReply reports whether the model produced no text, reasoning or tool
+// calls at all.
+func emptyReply(res *Result) bool {
+	return res != nil && strings.TrimSpace(res.RawText) == "" && strings.TrimSpace(res.RawReasoning) == "" && len(res.ToolCalls) == 0
 }
 
 // preparePreload fetches the named command's man page. If the command has no

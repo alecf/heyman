@@ -18,6 +18,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -201,6 +202,8 @@ func run() int {
 			break
 		}
 	}
+	warmups := map[string]eval.Warmup{}
+	var warmMu sync.Mutex
 	start := time.Now()
 	attempts, stats := eval.Run(ctx, cases, eval.Options{
 		Models:   modelList,
@@ -210,6 +213,19 @@ func run() int {
 		Executor: executor,
 		Judge:    j,
 		MaxCost:  *maxCost,
+		PrepareLocal: func(ctx context.Context, model string) error {
+			w, err := eval.PrepareOllama(ctx, strings.TrimSuffix(llm.OllamaBaseURL(), "/v1"), model)
+			if len(w.Unloaded) > 0 {
+				fmt.Fprintf(os.Stderr, "unloaded %s before %s\n", strings.Join(w.Unloaded, ", "), model)
+			}
+			if err == nil {
+				fmt.Fprintf(os.Stderr, "warmed up %s in %.1fs\n", model, w.LoadSeconds)
+			}
+			warmMu.Lock()
+			warmups[model] = w
+			warmMu.Unlock()
+			return err
+		},
 		NewAnswerer: func(ctx context.Context, model string) (assist.Answerer, llm.Spec, error) {
 			return assist.New(ctx, assist.Config{Model: model, Man: man, ReasoningEffort: *effort})
 		},
@@ -219,6 +235,9 @@ func run() int {
 	_ = results.Flush()
 	if sampler != nil {
 		meta["local_models"] = sampler.Stop()
+	}
+	if len(warmups) > 0 {
+		meta["warmup"] = warmups
 	}
 
 	meta["elapsed"] = time.Since(start).Round(time.Second).String()

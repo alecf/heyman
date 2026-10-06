@@ -628,3 +628,37 @@ func TestReasoningEffortReachesModelCall(t *testing.T) {
 		t.Fatalf("reasoning effort not passed to the model call: %+v", m.calls)
 	}
 }
+
+func TestEmptyReplyRetriesWithoutReasoningEffort(t *testing.T) {
+	m := &namedModel{provider: "ollama"}
+	m.steps = []step{{text: ""}, {text: "stat -f %z notes.txt"}}
+	a := &Assistant{Model: m, Man: &fakeMan{}, ReasoningEffort: "none"}
+	res, err := a.Ask(context.Background(), Request{Question: "size of notes.txt"})
+	if err != nil {
+		t.Fatalf("Ask: %v (calls: %d)", err, len(m.calls))
+	}
+	if res.Command != "stat -f %z notes.txt" {
+		t.Fatalf("command %q", res.Command)
+	}
+	if len(m.calls) != 2 || m.calls[0].ProviderOptions["ollama"] == nil || m.calls[1].ProviderOptions["ollama"] != nil {
+		t.Fatalf("want first call with effort, retry without: %+v", m.calls)
+	}
+	if len(res.Notes) == 0 || !strings.Contains(res.Notes[len(res.Notes)-1], "retried") {
+		t.Errorf("notes: %v", res.Notes)
+	}
+	if a.ReasoningEffort != "none" {
+		t.Errorf("Ask mutated the caller's Assistant: %q", a.ReasoningEffort)
+	}
+}
+
+func TestEmptyReplyWithoutReasoningEffortIsNotRetried(t *testing.T) {
+	m := &namedModel{provider: "ollama"}
+	m.steps = []step{{text: ""}, {text: "ls"}}
+	a := &Assistant{Model: m, Man: &fakeMan{}}
+	if _, err := a.Ask(context.Background(), Request{Question: "q"}); !errors.Is(err, ErrNoCommand) {
+		t.Fatalf("want ErrNoCommand, got %v", err)
+	}
+	if len(m.calls) != 1 {
+		t.Fatalf("calls: %d", len(m.calls))
+	}
+}

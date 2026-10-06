@@ -2,9 +2,15 @@ package eval
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -76,8 +82,13 @@ func OllamaVersion() string {
 
 // LoadedModel is one row of `ollama ps`.
 type LoadedModel struct {
+	// MemoryGB is the size Ollama reports. It can badly undercount: for
+	// Gemma 4 it omits the memory-mapped weights.
 	MemoryGB float64 `json:"memory_gb"`
 	Context  int     `json:"context,omitempty"`
+	// ResidentGB is the peak resident memory of Ollama's model runner
+	// process(es) while this was the only model loaded. Prefer it.
+	ResidentGB float64 `json:"resident_gb,omitempty"`
 }
 
 // ParseOllamaPS parses `ollama ps` output into model name → size/context.
@@ -132,11 +143,22 @@ func StartOllamaSampler(ctx context.Context, interval time.Duration) *OllamaSamp
 		defer t.Stop()
 		for {
 			if out, err := exec.CommandContext(ctx, "ollama", "ps").Output(); err == nil {
+				loaded := ParseOllamaPS(string(out))
+				// Runner RSS can only be attributed when one model is loaded.
+				rss := 0.0
+				if len(loaded) == 1 {
+					rss = runnerResidentGB(ctx)
+				}
 				s.mu.Lock()
-				for name, m := range ParseOllamaPS(string(out)) {
-					if m.MemoryGB > s.peak[name].MemoryGB {
-						s.peak[name] = m
+				for name, m := range loaded {
+					p := s.peak[name]
+					if m.MemoryGB > p.MemoryGB {
+						p.MemoryGB, p.Context = m.MemoryGB, m.Context
 					}
+					if rss > p.ResidentGB {
+						p.ResidentGB = rss
+					}
+					s.peak[name] = p
 				}
 				s.mu.Unlock()
 			}
@@ -161,4 +183,78 @@ func (s *OllamaSampler) Stop() map[string]LoadedModel {
 		out["ollama/"+name] = m
 	}
 	return out
+}
+
+// Warmup records how a local model was prepared before its first attempt.
+type Warmup struct {
+	LoadSeconds float64  `json:"load_seconds"`
+	Unloaded    []string `json:"unloaded,omitempty"`
+}
+
+// PrepareOllama unloads every other loaded Ollama model, then loads model
+// (a "ollama/<name>" spec) and keeps it resident, so the first timed attempt
+// doesn't pay the load and nothing else competes for memory. baseURL is the
+// server root, e.g. "http://localhost:11434".
+func PrepareOllama(ctx context.Context, baseURL, model string) (Warmup, error) {
+	var w Warmup
+	name := strings.TrimPrefix(model, "ollama/")
+	if out, err := exec.CommandContext(ctx, "ollama", "ps").Output(); err == nil {
+		for other := range ParseOllamaPS(string(out)) {
+			if other == name {
+				continue
+			}
+			if err := exec.CommandContext(ctx, "ollama", "stop", other).Run(); err == nil {
+				w.Unloaded = append(w.Unloaded, other)
+			}
+		}
+	}
+	// An empty prompt loads the model without generating. keep_alive covers
+	// gaps between attempts (slow cases, the judge, exec checks).
+	body, _ := json.Marshal(map[string]any{"model": name, "keep_alive": "30m"})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(baseURL, "/")+"/api/generate", bytes.NewReader(body))
+	if err != nil {
+		return w, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	start := time.Now()
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return w, err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	w.LoadSeconds = time.Since(start).Seconds()
+	if resp.StatusCode != http.StatusOK {
+		return w, fmt.Errorf("loading %s: %s", name, resp.Status)
+	}
+	return w, nil
+}
+
+// runnerResidentGB sums the resident memory of Ollama's model runner
+// processes (llama-server, or "ollama runner" in older versions).
+func runnerResidentGB(ctx context.Context) float64 {
+	out, err := exec.CommandContext(ctx, "ps", "-Ao", "rss=,command=").Output()
+	if err != nil {
+		return 0
+	}
+	return sumRunnerRSS(string(out))
+}
+
+func sumRunnerRSS(psOut string) float64 {
+	var kb float64
+	for _, line := range strings.Split(psOut, "\n") {
+		f := strings.Fields(line)
+		if len(f) < 2 {
+			continue
+		}
+		prog := filepath.Base(f[1])
+		isRunner := prog == "llama-server" || (prog == "ollama" && len(f) > 2 && f[2] == "runner")
+		if !isRunner {
+			continue
+		}
+		if v, err := strconv.ParseFloat(f[0], 64); err == nil {
+			kb += v
+		}
+	}
+	return kb / (1 << 20)
 }

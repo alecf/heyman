@@ -77,6 +77,11 @@ type Options struct {
 	MaxCost  float64       // 0 = unlimited
 	GOOS     string
 
+	// PrepareLocal, if set, runs before the first attempt of each local
+	// (ollama) model: e.g. unload other models and warm this one up, so
+	// load time isn't counted as answer latency.
+	PrepareLocal func(ctx context.Context, model string) error
+
 	NewAnswerer AnswererFactory
 	Results     io.Writer // JSON lines, written as attempts finish
 	Progress    io.Writer // human progress lines (may be nil)
@@ -125,24 +130,53 @@ func Run(ctx context.Context, cases []*Case, opts Options) ([]Attempt, RunStats)
 	}
 
 	r := &runner{opts: opts, perModel: map[string]*modelCost{}}
-	var local, remote []job
-	for rep := 1; rep <= opts.Repeat; rep++ {
-		for _, c := range cases {
-			for _, m := range opts.Models {
-				j := job{model: m, c: c, repeat: rep}
-				if spec, err := llm.ParseSpec(m); err == nil && spec.Provider == llm.Ollama {
-					local = append(local, j)
-				} else {
-					remote = append(remote, j)
-				}
+	// Local models share one machine: run them one model at a time (all of
+	// a model's attempts before the next model) so Ollama never swaps models
+	// between cases. Remote attempts interleave freely.
+	var local [][]job
+	var remote []job
+	for _, m := range opts.Models {
+		isLocal := false
+		if spec, err := llm.ParseSpec(m); err == nil && spec.Provider == llm.Ollama {
+			isLocal = true
+		}
+		var mine []job
+		for rep := 1; rep <= opts.Repeat; rep++ {
+			for _, c := range cases {
+				mine = append(mine, job{model: m, c: c, repeat: rep})
 			}
 		}
+		if isLocal {
+			local = append(local, mine)
+		} else {
+			remote = append(remote, mine...)
+		}
+		r.stats.Planned += len(mine)
 	}
-	r.stats.Planned = len(local) + len(remote)
+	// Interleave remote models case by case, as before.
+	sort.SliceStable(remote, func(i, k int) bool {
+		if remote[i].repeat != remote[k].repeat {
+			return remote[i].repeat < remote[k].repeat
+		}
+		return caseIndex(cases, remote[i].c) < caseIndex(cases, remote[k].c)
+	})
 
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go func() { defer wg.Done(); r.lane(ctx, local, 1) }()
+	go func() {
+		defer wg.Done()
+		for _, jobs := range local {
+			if ctx.Err() != nil {
+				return
+			}
+			if opts.PrepareLocal != nil {
+				if err := opts.PrepareLocal(ctx, jobs[0].model); err != nil && opts.Progress != nil {
+					fmt.Fprintf(opts.Progress, "warning: preparing %s: %v\n", jobs[0].model, err)
+				}
+			}
+			r.lane(ctx, jobs, 1)
+		}
+	}()
 	go func() { defer wg.Done(); r.lane(ctx, remote, opts.Parallel) }()
 	wg.Wait()
 
@@ -175,6 +209,15 @@ type runner struct {
 	perModel map[string]*modelCost
 	judgeN   int
 	judgeSum float64
+}
+
+func caseIndex(cases []*Case, c *Case) int {
+	for i, x := range cases {
+		if x == c {
+			return i
+		}
+	}
+	return len(cases)
 }
 
 // lane runs jobs with at most n in flight.
