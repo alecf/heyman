@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"charm.land/fantasy"
+	"charm.land/fantasy/providers/openaicompat"
 	"github.com/alecf/heyman/internal/manpage"
 )
 
@@ -555,5 +556,75 @@ func TestAskDoesNotMutateAssistant(t *testing.T) {
 	_ = a.withDefaults()
 	if a.MaxSteps != 0 || a.PageChars != 0 || a.Man != nil {
 		t.Fatalf("withDefaults mutated the receiver: %+v", a)
+	}
+}
+
+func TestAnswerFromMarkup(t *testing.T) {
+	for _, tc := range []struct{ name, in, cmd, expl string }{
+		{"qwen xml in reasoning, fenced, truncated tags",
+			"`du -b` isn't portable.\n\n<tool_call>\n<function=answer>\n<parameter=command>\n```bash\nfind . -type f -exec stat -f '%z %N' {} \\;\n</parameter>\n</function>\n</tool_call>",
+			`find . -type f -exec stat -f '%z %N' {} \;`, ""},
+		{"qwen xml with explanation",
+			"<function=answer><parameter=command>ls -lS</parameter><parameter=explanation>largest first</parameter></function>",
+			"ls -lS", "largest first"},
+		{"json tool call",
+			`<tool_call>{"name": "answer", "arguments": {"command": "lsof -i :8080"}}</tool_call>`,
+			"lsof -i :8080", ""},
+		{"other tool ignored", `<tool_call>{"name": "man", "arguments": {"page": "ls"}}</tool_call>`, "", ""},
+		{"plain reasoning with a draft command is not an answer", "maybe `ls -la` would work", "", ""},
+		{"dangling closing tags after a fence",
+			"Let me use the safer approach:\n```bash\nfind . -name '*.py' -exec cat {} \\; | wc -l\n</parameter>\n</function>\n</tool_call>",
+			`find . -name '*.py' -exec cat {} \; | wc -l`, ""},
+		{"final command sentence", "I found it in the man page.\n\nSo the command is: `stat -f %m notes.txt`", "stat -f %m notes.txt", ""},
+		{"command sentence not at the end is ignored", "The command is: `ls`\n\nBut wait, that's wrong.", "", ""},
+	} {
+		cmd, expl, ok := answerFromMarkup(tc.in)
+		if cmd != tc.cmd || expl != tc.expl || ok != (tc.cmd != "") {
+			t.Errorf("%s: got (%q, %q, %v), want (%q, %q)", tc.name, cmd, expl, ok, tc.cmd, tc.expl)
+		}
+	}
+}
+
+type namedModel struct {
+	fakeModel
+	provider string
+}
+
+func (m *namedModel) Provider() string { return m.provider }
+
+func TestReasoningOptions(t *testing.T) {
+	for _, tc := range []struct {
+		provider, effort string
+		want             bool
+	}{
+		{"ollama", "none", true},
+		{"openai-compat", "low", true},
+		{"ollama", "", false},
+		{"anthropic", "none", false},
+		{"openai", "none", false},
+	} {
+		po := reasoningOptions(&namedModel{provider: tc.provider}, tc.effort)
+		if (po != nil) != tc.want {
+			t.Errorf("%s/%q: got options %v, want present=%v", tc.provider, tc.effort, po, tc.want)
+			continue
+		}
+		if po != nil {
+			o, ok := po[tc.provider].(*openaicompat.ProviderOptions)
+			if !ok || o.ReasoningEffort == nil || string(*o.ReasoningEffort) != tc.effort {
+				t.Errorf("%s: options not set for provider key: %#v", tc.provider, po)
+			}
+		}
+	}
+}
+
+func TestReasoningEffortReachesModelCall(t *testing.T) {
+	m := &namedModel{provider: "ollama"}
+	m.steps = []step{{text: "ls -la"}}
+	a := &Assistant{Model: m, Man: &fakeMan{}, NoTools: true, ReasoningEffort: "none"}
+	if _, err := a.Ask(context.Background(), Request{Question: "list files"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.calls) == 0 || m.calls[0].ProviderOptions["ollama"] == nil {
+		t.Fatalf("reasoning effort not passed to the model call: %+v", m.calls)
 	}
 }

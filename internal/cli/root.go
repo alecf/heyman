@@ -33,6 +33,8 @@ type rootFlags struct {
 	json    bool
 	tokens  bool
 	copy    bool
+
+	reasoningEffort string
 }
 
 // Execute runs the heyman CLI.
@@ -75,6 +77,7 @@ Choose a model with --model provider/model (default ` + llm.DefaultModel + `):
 	pf.BoolVarP(&f.verbose, "verbose", "v", false, "show model, man pages consulted and tool calls on stderr")
 	pf.BoolVarP(&f.quiet, "quiet", "q", false, "suppress progress messages")
 	pf.BoolVarP(&f.debug, "debug", "d", false, "also print the system prompt and full tool trace on stderr")
+	pf.StringVar(&f.reasoningEffort, "reasoning-effort", "", "thinking level for ollama/openai-compat models: none (fastest), low, medium, high (env HEYMAN_REASONING_EFFORT)")
 	pf.BoolVar(&f.dryRun, "dry-run", false, "print the prompt (as sent to a tool-calling model) without calling a model")
 
 	fl := rootCmd.Flags()
@@ -152,6 +155,22 @@ func isSectionArg(s string) bool {
 	return len(s) == 1 && s[0] >= '1' && s[0] <= '9'
 }
 
+// reasoningEffort picks the thinking level: --reasoning-effort,
+// HEYMAN_REASONING_EFFORT, then the profile's reasoning_effort when the model
+// came from a profile.
+func reasoningEffort(f *rootFlags, cfg *config.Config, source string) string {
+	if f.reasoningEffort != "" {
+		return f.reasoningEffort
+	}
+	if e := os.Getenv("HEYMAN_REASONING_EFFORT"); e != "" {
+		return e
+	}
+	if name, ok := strings.CutPrefix(source, "profile "); ok {
+		return cfg.Profiles[name].ReasoningEffort
+	}
+	return ""
+}
+
 // resolveModel picks the model, most explicit first: --model, --profile,
 // HEYMAN_MODEL, HEYMAN_PROFILE, the config's default_profile, then
 // llm.DefaultModel. source says which one won (for -v and errors).
@@ -215,6 +234,7 @@ func run(cmd *cobra.Command, f *rootFlags, args []string) error {
 	if err != nil {
 		return err
 	}
+	effort := reasoningEffort(f, cfg, source)
 	spec, err := llm.ParseSpec(model)
 	if err != nil {
 		return err
@@ -284,7 +304,7 @@ func run(cmd *cobra.Command, f *rootFlags, args []string) error {
 				spin.Update(fmt.Sprintf("Searching man pages for %q…", e.Detail))
 			}
 		}
-		answerer, _, err := assist.New(ctx, assist.Config{Model: spec.String(), BaseURL: baseURL, Man: man, OnEvent: onEvent})
+		answerer, _, err := assist.New(ctx, assist.Config{Model: spec.String(), BaseURL: baseURL, ReasoningEffort: effort, Man: man, OnEvent: onEvent})
 		if err != nil {
 			stopSpin()
 			return err
@@ -294,6 +314,12 @@ func run(cmd *cobra.Command, f *rootFlags, args []string) error {
 		if f.debug && out != nil {
 			for _, tc := range out.ToolCalls {
 				fmt.Fprintf(os.Stderr, "  tool %s %s %s\n", tc.Tool, tc.Input, tc.Error)
+			}
+			if out.RawText != "" || out.RawReasoning != "" {
+				fmt.Fprintf(os.Stderr, "\n=== DEBUG: final reply (no command found) ===\n%s\n", out.RawText)
+				if out.RawReasoning != "" {
+					fmt.Fprintf(os.Stderr, "=== DEBUG: final reasoning ===\n%s\n", out.RawReasoning)
+				}
 			}
 		}
 		if ctx.Err() != nil {

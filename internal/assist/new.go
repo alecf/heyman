@@ -11,8 +11,11 @@ import (
 type Config struct {
 	Model   string // "provider/model"; empty means llm.DefaultModel
 	BaseURL string
-	Man     ManSource
-	OnEvent func(Event)
+	// ReasoningEffort is passed to ollama / openai-compat models ("none"
+	// disables thinking).
+	ReasoningEffort string
+	Man             ManSource
+	OnEvent         func(Event)
 }
 
 // New returns an Answerer for cfg.Model: a fantasy-backed Assistant for API
@@ -41,6 +44,8 @@ func New(ctx context.Context, cfg Config) (Answerer, llm.Spec, error) {
 		ModelName: spec.String(),
 		Man:       cfg.Man,
 		OnEvent:   cfg.OnEvent,
+
+		ReasoningEffort: cfg.ReasoningEffort,
 	}, spec, nil
 }
 
