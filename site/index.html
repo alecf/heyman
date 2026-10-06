@@ -91,6 +91,10 @@ td.model { font-family: var(--mono); font-size: 0.82rem; }
 .pass { color: var(--good-text); }
 .fail { color: var(--critical); }
 .status { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; }
+p code { white-space: nowrap; }
+.providers { margin-bottom: 16px; }
+.providers td { white-space: normal; vertical-align: top; color: var(--ink-2); }
+.providers td:first-child, .providers td:last-child { white-space: nowrap; }
 .matrix td.q { white-space: normal; min-width: 240px; color: var(--ink-2); }
 .matrix td.q code { font-size: 0.8em; }
 .matrix td.c { text-align: center; cursor: pointer; }
@@ -143,7 +147,20 @@ footer { margin-top: 64px; font-size: 0.85rem; color: var(--muted); }
 <pre><span class="p">$ </span>go install github.com/alecf/heyman/cmd/heyman@latest
 <span class="p">$ </span>export ANTHROPIC_API_KEY=…
 <span class="p">$ </span>heyman ls list files by size, largest first</pre>
-  <p>Any model works with <code>--model provider/model</code>: <code>anthropic</code>, <code>openai</code>, <code>openrouter</code>, <code>google</code>, <code>ollama</code>, any OpenAI-compatible server, or <code>claude-code</code> to use a Claude Code login. The default is <code>anthropic/claude-haiku-4-5</code>.</p>
+  <p>That uses the default model, <code>anthropic/claude-haiku-4-5</code>. To use another provider, set its credentials and pass <code>--model provider/model</code>, or set <code>HEYMAN_MODEL</code> once:</p>
+  <div class="table-wrap"><table class="providers">
+    <thead><tr><th scope="col">provider</th><th scope="col">setup</th><th scope="col">example</th></tr></thead>
+    <tbody>
+      <tr><td><code>anthropic</code></td><td><code>export ANTHROPIC_API_KEY=…</code> (or <code>CLAUDE_API_KEY</code>)</td><td><code>heyman -m anthropic/claude-sonnet-5-5 …</code></td></tr>
+      <tr><td><code>openai</code></td><td><code>export OPENAI_API_KEY=…</code></td><td><code>heyman -m openai/&lt;model&gt; …</code></td></tr>
+      <tr><td><code>openrouter</code></td><td><code>export OPENROUTER_API_KEY=…</code></td><td><code>heyman -m openrouter/&lt;org&gt;/&lt;model&gt; …</code></td></tr>
+      <tr><td><code>google</code></td><td><code>export GEMINI_API_KEY=…</code> (or <code>GOOGLE_API_KEY</code>)</td><td><code>heyman -m google/&lt;gemini model&gt; …</code></td></tr>
+      <tr><td><code>ollama</code></td><td>Run <code>ollama serve</code> and <code>ollama pull &lt;model&gt;</code>. Set <code>OLLAMA_HOST</code> if it isn’t on <code>localhost:11434</code>.</td><td><code>heyman -m ollama/qwen3:4b …</code></td></tr>
+      <tr><td><code>openai-compat</code></td><td><code>export HEYMAN_OPENAI_COMPAT_BASE_URL=http://localhost:8080/v1</code> for llama.cpp, vLLM, LM Studio and the like. Add <code>HEYMAN_OPENAI_COMPAT_API_KEY</code> if the server needs a key.</td><td><code>heyman -m openai-compat/&lt;model&gt; …</code></td></tr>
+      <tr><td><code>claude-code</code></td><td>Install the <code>claude</code> CLI and log in. No API key needed; expect 10s or more per request.</td><td><code>heyman -m claude-code/haiku …</code></td></tr>
+    </tbody>
+  </table></div>
+  <p>Local models need tool-calling support to read man pages; heyman falls back to a single prompt with the named man page if they don’t have it. To save a choice, run <code>heyman profile setup</code>. <a href="https://github.com/alecf/heyman#models">More on models and configuration</a>.</p>
 
   <h2 id="evals">Eval results</h2>
   <p>50 requests a developer might type, from <code>lsof</code> one-liners to multi-tool pipelines like “list the size of all files changed in git in the last week.” Eleven are cases where the correct flags differ between macOS and Linux (<code>sed -i ''</code>, <code>stat -f</code>, <code>date -v-1d</code>), which is what reading local man pages is supposed to fix.</p>
