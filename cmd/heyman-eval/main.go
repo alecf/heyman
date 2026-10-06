@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -209,6 +210,14 @@ func run() int {
 			break
 		}
 	}
+	// Keep the machine awake for the run: sleeping mid-request freezes local
+	// models and skews latency. Then measure whether it slept anyway (wall
+	// clock vs. the monotonic clock, which stops during sleep).
+	if how := keepAwake(); how != "" {
+		meta["kept_awake"] = how
+	}
+	wallStart, monoStart := time.Now().Round(0), time.Now()
+
 	warmups := map[string]eval.Warmup{}
 	var warmMu sync.Mutex
 	start := time.Now()
@@ -248,6 +257,10 @@ func run() int {
 	}
 
 	meta["elapsed"] = time.Since(start).Round(time.Second).String()
+	if slept := time.Now().Round(0).Sub(wallStart) - time.Since(monoStart); slept > 30*time.Second {
+		meta["slept_seconds"] = int(slept.Seconds())
+		fmt.Fprintf(os.Stderr, "WARNING: the machine slept for about %s during this run; latencies and timeouts are unreliable. Re-run it.\n", slept.Round(time.Second))
+	}
 	meta["planned"] = stats.Planned
 	meta["completed"] = stats.Completed
 	meta["interrupted"] = stats.Interrupted
@@ -372,4 +385,23 @@ func exportSite(cases []*eval.Case, out string, dirs []string, aliases map[strin
 		fmt.Printf("%-30s %d/%d\n", m.Model, m.Pass, m.N)
 	}
 	return 0
+}
+
+// keepAwake prevents idle and system sleep for the life of this process
+// (macOS caffeinate). It returns a description, or "" if unavailable.
+func keepAwake() string {
+	if runtime.GOOS != "darwin" {
+		return ""
+	}
+	path, err := exec.LookPath("caffeinate")
+	if err != nil {
+		return ""
+	}
+	// -w: exit when this process exits, so nothing is left behind.
+	cmd := exec.Command(path, "-i", "-s", "-m", "-w", strconv.Itoa(os.Getpid()))
+	if err := cmd.Start(); err != nil {
+		return ""
+	}
+	go func() { _ = cmd.Wait() }()
+	return "caffeinate -i -s -m"
 }
