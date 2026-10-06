@@ -662,3 +662,41 @@ func TestEmptyReplyWithoutReasoningEffortIsNotRetried(t *testing.T) {
 		t.Fatalf("calls: %d", len(m.calls))
 	}
 }
+
+func TestReadManRepeatAndSubcommandHint(t *testing.T) {
+	man := &fakeMan{pages: map[string]string{
+		"git":          "GIT(1)\n  git - the stupid content tracker\n",
+		"git-rev-list": "GIT-REV-LIST(1)\n  --count  Print a number stating how many commits\n",
+	}}
+	r := &run{a: (&Assistant{Man: man}).withDefaults(), pages: map[string]string{}}
+
+	out, err := r.readMan(manInput{Page: "git", Search: "rev-list --count"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "no lines match") || !strings.Contains(out, `"git-rev-list"`) {
+		t.Errorf("want subcommand hint, got %q", out)
+	}
+
+	again, _ := r.readMan(manInput{Page: "git", Search: "rev-list --count"})
+	if !strings.Contains(again, "already ran this exact lookup") {
+		t.Errorf("want repeat notice, got %q", again)
+	}
+	// Case/whitespace differences still count as the same lookup.
+	again2, _ := r.readMan(manInput{Page: "git", Search: " REV-LIST --count "})
+	if !strings.Contains(again2, "already ran") {
+		t.Errorf("want repeat notice for equivalent search, got %q", again2)
+	}
+	// A different search is fine.
+	if other, _ := r.readMan(manInput{Page: "git-rev-list", Search: "--count"}); !strings.Contains(other, "Print a number") {
+		t.Errorf("got %q", other)
+	}
+	// Options never trigger the subcommand hint.
+	if opt, _ := r.readMan(manInput{Page: "git", Search: "--nonexistent"}); strings.Contains(opt, "subcommands") {
+		t.Errorf("option search got a subcommand hint: %q", opt)
+	}
+	r.reset()
+	if fresh, _ := r.readMan(manInput{Page: "git", Search: "rev-list --count"}); strings.Contains(fresh, "already ran") {
+		t.Errorf("reset should clear lookup history: %q", fresh)
+	}
+}

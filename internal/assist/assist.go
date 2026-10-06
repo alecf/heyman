@@ -262,12 +262,13 @@ type run struct {
 	req     Request
 	missing string // command named by the user that has no man page
 
-	mu        sync.Mutex
-	pages     map[string]string // "name(section)" -> cleaned page
-	manPages  []string
-	toolCalls []ToolCall
-	notes     []string
-	answer    *answerInput
+	mu          sync.Mutex
+	seenLookups map[string]int
+	pages       map[string]string // "name(section)" -> cleaned page
+	manPages    []string
+	toolCalls   []ToolCall
+	notes       []string
+	answer      *answerInput
 	// rejected is the last answer refused for lacking an explanation; used
 	// if the model never retries.
 	rejected *answerInput
@@ -279,6 +280,7 @@ func (r *run) reset() {
 	r.toolCalls = nil
 	r.answer = nil
 	r.rejected = nil
+	r.seenLookups = nil
 }
 
 func (r *run) note(msg string) {
@@ -539,10 +541,51 @@ func (r *run) readMan(in manInput) (string, error) {
 	}
 	r.consulted(name, section)
 
+	// Small models sometimes repeat the same lookup until they run out of
+	// steps. Say so instead of returning the same text again.
+	sig := fmt.Sprintf("%s\x00%s\x00%d", key, strings.ToLower(strings.TrimSpace(in.Search)), in.Offset)
+	r.mu.Lock()
+	repeats := r.seenLookups[sig]
+	if r.seenLookups == nil {
+		r.seenLookups = map[string]int{}
+	}
+	r.seenLookups[sig]++
+	r.mu.Unlock()
+	if repeats > 0 {
+		return fmt.Sprintf("You already ran this exact lookup (man %s) and its result is above. Don't repeat it: try a different search or page, or call answer with your best command now.", describeMan(in)), nil
+	}
+
 	if in.Search != "" {
-		return Grep(page, in.Search, 2, r.a.PageChars), nil
+		out := Grep(page, in.Search, 2, r.a.PageChars)
+		if strings.HasPrefix(out, "no lines match") {
+			if sub := r.subcommandPage(name, in.Search); sub != "" {
+				out += fmt.Sprintf(". %s subcommands have their own man pages: try man(page=%q).", name, sub)
+			}
+		}
+		return out, nil
 	}
 	return Chunk(key, page, in.Offset, r.a.PageChars), nil
+}
+
+// subcommandPage returns "<page>-<word>" when the search's first word names a
+// subcommand with its own man page (git rev-list → git-rev-list).
+func (r *run) subcommandPage(page, search string) string {
+	fields := strings.Fields(strings.Trim(search, "\"'"))
+	if len(fields) == 0 {
+		return ""
+	}
+	word := strings.TrimLeft(fields[0], "-")
+	if word == "" || word != fields[0] {
+		return "" // an option, not a subcommand
+	}
+	cand := page + "-" + word
+	if manpage.ValidateName(cand) != nil {
+		return ""
+	}
+	if _, err := r.a.Man.Fetch(cand, ""); err != nil {
+		return ""
+	}
+	return cand
 }
 
 type manSearchInput struct {
