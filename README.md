@@ -121,10 +121,11 @@ heyman [flags] "<whole request in one quoted argument>"
 Pick a model with `--model provider/model`. heyman checks these in order and uses the first one that's set:
 
 1. `--model`
-2. the `HEYMAN_MODEL` environment variable
-3. `--profile`, or `HEYMAN_PROFILE`
-4. `default_profile` in the config file
-5. the built-in default, `anthropic/claude-haiku-4-5`
+2. `--profile`
+3. the `HEYMAN_MODEL` environment variable
+4. the `HEYMAN_PROFILE` environment variable
+5. `default_profile` in the config file (set it with `heyman profile set-default <name>`)
+6. the built-in default, `anthropic/claude-haiku-4-5`
 
 | Provider | Credentials | Example |
 |----------|-------------|---------|
