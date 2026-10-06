@@ -1,6 +1,10 @@
-# heyman
+# hey, man!
 
-heyman turns a plain-English request into a shell command. Before answering, the model reads the man pages installed on your machine, so the flags it uses are the ones your system actually has.
+[![CI](https://github.com/alecf/heyman/actions/workflows/ci.yml/badge.svg)](https://github.com/alecf/heyman/actions/workflows/ci.yml)
+
+> hey, man, how do I find which process is listening on port 8080?
+
+`heyman` turns a plain-English request into a shell command. Before answering, the model reads the man pages installed on your machine, so the flags it uses are the ones your system actually has.
 
 Project page and latest eval results: https://alecf.github.io/heyman/
 

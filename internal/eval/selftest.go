@@ -19,8 +19,12 @@ type ManChecker interface {
 	Fetch(name, section string) (string, error)
 }
 
+// referenceOS is the OS that a case's `reference` answers are written for;
+// answers for other systems go in references_by_os.
+const referenceOS = "darwin"
+
 // SelfTest grades every case's references instead of calling a model:
-// reference[0] must pass all checks on goos (error), other references should
+// reference[0] must pass all checks as macOS (error), other references should
 // too (warning). With an executor, exec cases also run reference[0] against
 // itself (the setup must work and the output must be non-empty) and the other
 // references against reference[0] (warning on mismatch). With man, it checks
@@ -45,8 +49,11 @@ func SelfTest(ctx context.Context, cases []*Case, goos string, ex *Executor, man
 			add(c, "warn", "skipped on this machine: %s", reason)
 			continue
 		}
+		// `reference` holds the macOS (BSD) answers by definition, so grade it
+		// as darwin wherever the self-test runs; the dataset check is then
+		// host-independent. Exec below still runs on the host.
 		for i, ref := range c.Reference {
-			g := c.GradeCommand(ref, goos)
+			g := c.GradeCommand(ref, referenceOS)
 			if g.Pass {
 				continue
 			}

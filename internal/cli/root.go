@@ -47,8 +47,10 @@ func newRootCmd(version, commit, date string, runFn func(*cobra.Command, *rootFl
 
 	rootCmd := &cobra.Command{
 		Use:   "heyman [flags] <command> <request>\n  heyman [flags] -- <request>",
-		Short: "Ask for a shell command in plain English",
-		Long: `heyman turns a plain-English request into a shell command, checking the
+		Short: "hey, man! Ask for a shell command in plain English",
+		Long: `hey, man!
+
+heyman turns a plain-English request into a shell command, checking the
 man pages on this machine so the flags match your system.
 
 Name the program you have in mind, or use -- and let heyman pick:
@@ -139,12 +141,12 @@ func parseRequest(args []string, dash int, section string) (assist.Request, erro
 		return req, errNoRequest
 	}
 	if req.Question == "" {
-		return req, fmt.Errorf("no request given for %q. Usage: heyman %s <what you want to do>  (or: heyman -- %s)", req.Command, req.Command, req.Command)
+		return req, fmt.Errorf("hey, man, what do you want %s to do? Usage: heyman %s <what you want to do>  (or: heyman -- %s)", req.Command, req.Command, req.Command)
 	}
 	return req, nil
 }
 
-var errNoRequest = errors.New("no request given. Usage: heyman <command> <what you want to do>, or heyman -- <what you want to do>")
+var errNoRequest = errors.New("hey, man, what do you want to do? Usage: heyman <command> <what you want to do>, or heyman -- <what you want to do>")
 
 func isSectionArg(s string) bool {
 	return len(s) == 1 && s[0] >= '1' && s[0] <= '9'
