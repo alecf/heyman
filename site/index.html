@@ -104,6 +104,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 td.model { font-family: var(--mono); font-size: 0.82rem; }
 .pass { color: var(--good-text); }
 .fail { color: var(--critical); }
+.mixed { color: var(--ink-2); font-size: 0.8rem; }
 .status { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; }
 p code { white-space: nowrap; }
 .providers { margin-bottom: 16px; }
@@ -273,7 +274,9 @@ footer { margin-top: 64px; font-size: 0.85rem; color: var(--muted); }
     for (const m of models) {
       const rate = m.n ? m.pass / m.n : 0;
       const partial = m.n < data.cases.length;
-      const label = el("div", { class: "bar-label" }, short(m.model), partial ? el("small", { text: m.n + " of " + data.cases.length + " cases" }) : null);
+      const runs = Math.round(m.n / data.cases.length);
+      const note = partial ? m.n + " of " + data.cases.length + " cases" : runs > 1 ? runs + " runs, " + m.n + " attempts" : null;
+      const label = el("div", { class: "bar-label" }, short(m.model), note ? el("small", { text: note }) : null);
       const bar = el("div", { class: "bar", tabindex: "0", role: "listitem", "aria-label": `${m.model}: ${pct(m.pass, m.n)} (${m.pass} of ${m.n})` });
       bar.style.width = (rate * 100) + "%";
       const value = el("span", { class: "bar-value", text: `${pct(m.pass, m.n)}` });
@@ -378,7 +381,12 @@ footer { margin-top: 64px; font-size: 0.85rem; color: var(--muted); }
         el("div", null, ...[c.difficulty, ...c.tags.filter((t) => t !== c.difficulty)].map((t) => el("span", { class: "tag", text: t }))));
       const cells = models.map((m) => {
         const res = m.results[c.id];
-        return el("td", { class: "c num" }, res ? status(res.pass) : el("span", { class: "note", text: "–" }));
+        if (!res) return el("td", { class: "c num" }, el("span", { class: "note", text: "–" }));
+        const n = res.attempts || 1, p = res.attempts ? res.passes : (res.pass ? 1 : 0);
+        if (n > 1 && p > 0 && p < n) {
+          return el("td", { class: "c num" }, el("span", { class: "status mixed", text: `${p}/${n}`, "aria-label": `passed ${p} of ${n}` }));
+        }
+        return el("td", { class: "c num" }, status(p === n));
       });
       const tr = el("tr", { tabindex: "0", "aria-expanded": "false" }, q, ...cells);
       const detail = el("tr", { class: "detail", hidden: "" });
@@ -387,8 +395,9 @@ footer { margin-top: 64px; font-size: 0.85rem; color: var(--muted); }
         ...models.filter((m) => m.results[c.id]).map((m) => {
           const res = m.results[c.id];
           const why = res.pass ? "" : (res.first_failure || res.error || "");
+          const tally = res.attempts > 1 ? el("span", { class: "note", text: ` (passed ${res.passes} of ${res.attempts}; latest shown)` }) : null;
           return el("div", null, status(res.pass), " ", el("strong", { text: short(m.model) + "  " }),
-            res.command ? el("code", { text: res.command }) : el("em", { text: "no command" }),
+            res.command ? el("code", { text: res.command }) : el("em", { text: "no command" }), tally,
             why ? el("div", { class: "note", text: "failed: " + why }) : null,
             res.judge ? el("div", { class: "note", text: `judge: ${res.judge}${res.judge_reason ? " — " + res.judge_reason : ""}` }) : null);
         }));
@@ -401,7 +410,7 @@ footer { margin-top: 64px; font-size: 0.85rem; color: var(--muted); }
       tr.addEventListener("click", toggle);
       tr.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
       body.append(tr, detail);
-      rows.push({ c, tr, detail, failedAny: models.some((m) => m.results[c.id] && !m.results[c.id].pass) });
+      rows.push({ c, tr, detail, failedAny: models.some((m) => { const r = m.results[c.id]; return r && (r.attempts ? r.passes < r.attempts : !r.pass); }) });
     }
     matrix.append(body);
 

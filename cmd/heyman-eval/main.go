@@ -46,6 +46,7 @@ func run() int {
 		maxCost   = flag.Float64("max-cost", 0, "stop scheduling attempts before estimated spend exceeds this many USD (0 = no limit)")
 		selfTest  = flag.Bool("self-test", false, "grade the references instead of calling models")
 		list      = flag.Bool("list", false, "list matching cases and exit")
+		aliases   = flag.String("alias", "", "with --export-site: rename models, e.g. ollama/hm-gemma4-12b:32k=ollama/gemma4:12b,…")
 		exportTo  = flag.String("export-site", "", "write a site JSON snapshot of the result dirs given as arguments (re-graded with the current cases; no model calls) and exit")
 		effort    = flag.String("reasoning-effort", "", "reasoning effort for ollama/openai-compat models (none disables thinking)")
 		gradeCmd  = flag.String("grade", "", "grade this command against the matching cases (deterministic checks; exec too with --exec) and exit")
@@ -87,7 +88,13 @@ func run() int {
 	}
 
 	if *exportTo != "" {
-		return exportSite(cases, *exportTo, flag.Args())
+		am := map[string]string{}
+		for _, pair := range splitList(*aliases) {
+			if from, to, ok := strings.Cut(pair, "="); ok {
+				am[strings.TrimSpace(from)] = strings.TrimSpace(to)
+			}
+		}
+		return exportSite(cases, *exportTo, flag.Args(), am)
 	}
 
 	if *gradeCmd != "" {
@@ -342,12 +349,12 @@ func reproCommand() string {
 	return strings.Join(parts, " ")
 }
 
-func exportSite(cases []*eval.Case, out string, dirs []string) int {
+func exportSite(cases []*eval.Case, out string, dirs []string, aliases map[string]string) int {
 	if len(dirs) == 0 {
 		fmt.Fprintln(os.Stderr, "--export-site needs one or more results directories as arguments")
 		return 2
 	}
-	data, err := eval.BuildSiteData(cases, dirs, "darwin", time.Now().UTC().Format("2006-01-02"))
+	data, err := eval.BuildSiteData(cases, dirs, "darwin", time.Now().UTC().Format("2006-01-02"), aliases)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
