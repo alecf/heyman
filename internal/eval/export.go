@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // SiteData is the eval snapshot published on the project page.
@@ -27,6 +28,9 @@ type SiteRun struct {
 	Planned     int      `json:"planned"`
 	Interrupted bool     `json:"interrupted"`
 	Judge       string   `json:"judge,omitempty"`
+	Hardware    Hardware `json:"hardware"`
+	Ollama      string   `json:"ollama_version,omitempty"`
+	Reasoning   string   `json:"reasoning_effort,omitempty"`
 }
 
 // SiteModel is one model's aggregate scores.
@@ -38,6 +42,7 @@ type SiteModel struct {
 	ByTag        map[string][2]int   `json:"by_tag"`
 	ByForm       map[string][2]int   `json:"by_form"`
 	Errors       int                 `json:"errors"`
+	LatencyAvg   float64             `json:"latency_avg_s"`
 	LatencyP50   float64             `json:"latency_p50_s"`
 	LatencyP95   float64             `json:"latency_p95_s"`
 	ToolCalls    float64             `json:"avg_tool_calls"`
@@ -49,6 +54,14 @@ type SiteModel struct {
 	JudgeCorrect int                 `json:"judge_correct"`
 	Judged       int                 `json:"judged"`
 	Results      map[string]SiteCell `json:"results"` // by case id
+
+	// Where it ran: the run, and for local models the peak memory, context
+	// window and settings observed during the run.
+	Run       string   `json:"run"`
+	Local     bool     `json:"local"`
+	MemoryGB  *float64 `json:"memory_gb,omitempty"`
+	Context   int      `json:"context,omitempty"`
+	Reasoning string   `json:"reasoning_effort,omitempty"`
 }
 
 // SiteCell is one model's answer to one case.
@@ -126,19 +139,24 @@ func BuildSiteData(cases []*Case, dirs []string, goos, generated string) (*SiteD
 	var all []Attempt
 	var models []string
 	seen := map[string]bool{}
+	runOf := map[string]modelRun{}
 	for _, dir := range dirs {
 		attempts, err := ReadAttempts(dir)
 		if err != nil {
 			return nil, err
 		}
 		var meta struct {
-			OS          string   `json:"os"`
-			Models      []string `json:"models"`
-			GitHead     string   `json:"git_head"`
-			Completed   int      `json:"completed"`
-			Planned     int      `json:"planned"`
-			Interrupted bool     `json:"interrupted"`
-			Judge       string   `json:"judge"`
+			OS          string                 `json:"os"`
+			Models      []string               `json:"models"`
+			GitHead     string                 `json:"git_head"`
+			Completed   int                    `json:"completed"`
+			Planned     int                    `json:"planned"`
+			Interrupted bool                   `json:"interrupted"`
+			Judge       string                 `json:"judge"`
+			Hardware    Hardware               `json:"hardware"`
+			Ollama      string                 `json:"ollama_version"`
+			Reasoning   string                 `json:"reasoning_effort"`
+			Local       map[string]LoadedModel `json:"local_models"`
 		}
 		if raw, err := os.ReadFile(filepath.Join(dir, "run.json")); err == nil {
 			_ = json.Unmarshal(raw, &meta)
@@ -146,7 +164,15 @@ func BuildSiteData(cases []*Case, dirs []string, goos, generated string) (*SiteD
 		data.Runs = append(data.Runs, SiteRun{
 			Dir: filepath.Base(dir), OS: meta.OS, Models: meta.Models, GitHead: meta.GitHead,
 			Completed: meta.Completed, Planned: meta.Planned, Interrupted: meta.Interrupted, Judge: meta.Judge,
+			Hardware: meta.Hardware, Ollama: meta.Ollama, Reasoning: meta.Reasoning,
 		})
+		for _, m := range meta.Models {
+			info := modelRun{run: filepath.Base(dir), reasoning: meta.Reasoning}
+			if lm, ok := meta.Local[m]; ok {
+				info.loaded = &lm
+			}
+			runOf[m] = info
+		}
 		for _, m := range meta.Models {
 			if !seen[m] {
 				seen[m] = true
@@ -181,12 +207,23 @@ func BuildSiteData(cases []*Case, dirs []string, goos, generated string) (*SiteD
 		m := SiteModel{
 			Model: s.Model, Pass: s.Overall.Pass, N: s.Overall.N,
 			ByDifficulty: rates(s.ByDiff), ByTag: rates(s.ByTag), ByForm: rates(s.ByForm),
-			Errors: s.Errors, LatencyP50: s.LatencyP50, LatencyP95: s.LatencyP95,
+			Errors: s.Errors, LatencyAvg: s.LatencyAvg, LatencyP50: s.LatencyP50, LatencyP95: s.LatencyP95,
 			ToolCalls: s.AvgToolCalls, ExtraManPct: s.ConsultedExtraPct,
 			CostKnown: s.CostKnown, CostPerCase: s.CostPerCase,
 			ExecPass: s.ExecPass, ExecRan: s.ExecRan,
 			JudgeCorrect: s.JudgeCorrect, Judged: s.Judged,
 			Results: map[string]SiteCell{},
+		}
+		if info, ok := runOf[s.Model]; ok {
+			m.Run = info.run
+			m.Local = strings.HasPrefix(s.Model, "ollama/") || strings.HasPrefix(s.Model, "openai-compat/")
+			if m.Local {
+				m.Reasoning = info.reasoning
+			}
+			if info.loaded != nil {
+				gb := info.loaded.MemoryGB
+				m.MemoryGB, m.Context = &gb, info.loaded.Context
+			}
 		}
 		data.Models = append(data.Models, m)
 	}
@@ -218,6 +255,12 @@ func BuildSiteData(cases []*Case, dirs []string, goos, generated string) (*SiteD
 		})
 	}
 	return data, nil
+}
+
+type modelRun struct {
+	run       string
+	reasoning string
+	loaded    *LoadedModel
 }
 
 func rates(m map[string]*Rate) map[string][2]int {

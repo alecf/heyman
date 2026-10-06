@@ -180,6 +180,7 @@ func run() int {
 		"judge":    *judge,
 		"max_cost": *maxCost,
 		"os":       eval.OSDescription(),
+		"hardware": eval.DetectHardware(),
 		"git_head": gitHead(),
 		"go":       runtime.Version(),
 		"command":  strings.Join(os.Args, " "),
@@ -187,6 +188,19 @@ func run() int {
 
 	fmt.Fprintf(os.Stderr, "heyman-eval: %d cases × %d models × %d repeats → %s\n", len(cases), len(modelList), *repeat, dir)
 	man := manpage.NewFetcher()
+	// For local models, record the Ollama version, settings and the peak
+	// memory / context each model used, so results can be compared.
+	var sampler *eval.OllamaSampler
+	for _, m := range modelList {
+		if strings.HasPrefix(m, llm.Ollama+"/") {
+			meta["ollama_version"] = eval.OllamaVersion()
+			if *effort != "" {
+				meta["reasoning_effort"] = *effort
+			}
+			sampler = eval.StartOllamaSampler(ctx, 5*time.Second)
+			break
+		}
+	}
 	start := time.Now()
 	attempts, stats := eval.Run(ctx, cases, eval.Options{
 		Models:   modelList,
@@ -203,6 +217,9 @@ func run() int {
 		Progress: os.Stderr,
 	})
 	_ = results.Flush()
+	if sampler != nil {
+		meta["local_models"] = sampler.Stop()
+	}
 
 	meta["elapsed"] = time.Since(start).Round(time.Second).String()
 	meta["planned"] = stats.Planned
