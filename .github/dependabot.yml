@@ -1,0 +1,44 @@
+# Dependabot version updates.
+#
+# Kept deliberately conservative:
+# - cooldown: a new release must be at least 7 days old before Dependabot
+#   proposes it, so a compromised or broken release has time to be noticed
+#   and yanked first. (Security updates ignore cooldown and still arrive
+#   immediately.)
+# - weekly, grouped PRs to keep the noise down; major Go bumps get their
+#   own PR because they can change behaviour.
+# - nothing auto-merges: every update goes through CI and a human.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    allow:
+      # Direct dependencies only; indirect ones move with them.
+      - dependency-type: direct
+    groups:
+      go-minor-and-patch:
+        applies-to: version-updates
+        update-types: [minor, patch]
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps(go)"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        applies-to: version-updates
+        patterns: ["*"]
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps(actions)"
