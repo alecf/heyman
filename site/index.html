@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>heyman</title>
+<title>hey, man!</title>
 <meta name="description" content="heyman turns a plain-English request into a shell command, checking the man pages on your machine so the flags match your system. Eval results across models.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232a78d6'/%3E%3Ctext x='6' y='22' font-family='monospace' font-size='16' font-weight='700' fill='white'%3E$_%3C/text%3E%3C/svg%3E">
 <style>
@@ -44,7 +44,7 @@
 html { -webkit-text-size-adjust: 100%; }
 body { margin: 0; background: var(--page); color: var(--ink); font: 16px/1.55 var(--sans); }
 main { max-width: 880px; margin: 0 auto; padding: 48px 16px 80px; }
-h1 { font: 700 2.4rem/1.1 var(--mono); margin: 0 0 12px; letter-spacing: -0.02em; }
+h1 { font: 700 2.6rem/1.1 var(--sans); margin: 0 0 8px; letter-spacing: -0.03em; }
 h2 { font-size: 1.35rem; margin: 56px 0 12px; }
 h3 { font-size: 1rem; margin: 28px 0 8px; }
 p { margin: 0 0 14px; color: var(--ink-2); }
@@ -54,6 +54,8 @@ code { font: 0.88em var(--mono); background: var(--code-bg); padding: 1px 5px; b
 pre { font: 0.86rem/1.6 var(--mono); background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; overflow-x: auto; margin: 0 0 16px; }
 pre .p { color: var(--muted); user-select: none; }
 pre .o { color: var(--ink-2); }
+.tagline { font-size: 1.05rem; font-style: italic; color: var(--muted); margin: 0 0 18px; }
+.lede code { font-size: 0.95em; }
 .lede { font-size: 1.12rem; color: var(--ink-2); max-width: 640px; }
 .links { display: flex; gap: 16px; flex-wrap: wrap; margin: 18px 0 32px; font-size: 0.95rem; }
 ul { color: var(--ink-2); padding-left: 20px; }
@@ -110,8 +112,9 @@ footer { margin-top: 64px; font-size: 0.85rem; color: var(--muted); }
 </head>
 <body>
 <main>
-  <h1>heyman</h1>
-  <p class="lede">Ask for a shell command in plain English. heyman lets the model read the man pages on <em>your</em> machine before it answers, so the flags match your system: BSD tools on macOS, GNU on Linux.</p>
+  <h1>hey, man!</h1>
+  <p class="tagline">hey, man, how do I find which process is listening on port 8080?</p>
+  <p class="lede"><code>heyman</code>: ask for a shell command in plain English. heyman lets the model read the man pages on <em>your</em> machine before it answers, so the flags match your system: BSD tools on macOS, GNU on Linux.</p>
   <div class="links">
     <a href="https://github.com/alecf/heyman">GitHub</a>
     <a href="https://github.com/alecf/heyman#install">Install</a>
