@@ -221,7 +221,12 @@ func BuildSiteData(cases []*Case, dirs []string, goos, generated string) (*SiteD
 				m.Reasoning = info.reasoning
 			}
 			if info.loaded != nil {
+				// Prefer measured runner RSS; Ollama's own figure can omit
+				// memory-mapped weights.
 				gb := info.loaded.MemoryGB
+				if info.loaded.ResidentGB > 0 {
+					gb = info.loaded.ResidentGB
+				}
 				m.MemoryGB, m.Context = &gb, info.loaded.Context
 			}
 		}
