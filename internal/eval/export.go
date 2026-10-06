@@ -66,6 +66,8 @@ type SiteModel struct {
 
 // SiteCell is one model's answer to one case.
 type SiteCell struct {
+	Attempts     int    `json:"attempts"`
+	Passes       int    `json:"passes"`
 	Command      string `json:"command,omitempty"`
 	Pass         bool   `json:"pass"`
 	Error        string `json:"error,omitempty"`
@@ -134,8 +136,20 @@ func Regrade(cases []*Case, attempts []Attempt, goos string) {
 
 // BuildSiteData merges result directories into a site snapshot. When the
 // same model appears in several runs, the later directory wins per case.
-func BuildSiteData(cases []*Case, dirs []string, goos, generated string) (*SiteData, error) {
+//
+// The same model may appear in several runs: its attempts are combined (each
+// run's repeats are renumbered after the previous run's), so pass rates and
+// latencies cover every attempt. aliases renames models, e.g. a local copy
+// "ollama/hm-gemma4-12b:32k" to "ollama/gemma4:12b".
+func BuildSiteData(cases []*Case, dirs []string, goos, generated string, aliases map[string]string) (*SiteData, error) {
 	data := &SiteData{Generated: generated}
+	alias := func(m string) string {
+		if a, ok := aliases[m]; ok {
+			return a
+		}
+		return m
+	}
+	repeatOffset := map[string]int{}
 	var all []Attempt
 	var models []string
 	seen := map[string]bool{}
@@ -161,14 +175,42 @@ func BuildSiteData(cases []*Case, dirs []string, goos, generated string) (*SiteD
 		if raw, err := os.ReadFile(filepath.Join(dir, "run.json")); err == nil {
 			_ = json.Unmarshal(raw, &meta)
 		}
+		for i, m := range meta.Models {
+			meta.Models[i] = alias(m)
+		}
+		local := map[string]LoadedModel{}
+		for m, lm := range meta.Local {
+			local[alias(m)] = lm
+		}
+		meta.Local = local
+		maxRepeat := map[string]int{}
+		for i := range attempts {
+			a := &attempts[i]
+			a.Model = alias(a.Model)
+			a.Repeat += repeatOffset[a.Model]
+			if a.Repeat > maxRepeat[a.Model] {
+				maxRepeat[a.Model] = a.Repeat
+			}
+		}
+		for m, r := range maxRepeat {
+			repeatOffset[m] = r
+		}
 		data.Runs = append(data.Runs, SiteRun{
 			Dir: filepath.Base(dir), OS: meta.OS, Models: meta.Models, GitHead: meta.GitHead,
 			Completed: meta.Completed, Planned: meta.Planned, Interrupted: meta.Interrupted, Judge: meta.Judge,
 			Hardware: meta.Hardware, Ollama: meta.Ollama, Reasoning: meta.Reasoning,
 		})
 		for _, m := range meta.Models {
-			info := modelRun{run: filepath.Base(dir), reasoning: meta.Reasoning}
-			if lm, ok := meta.Local[m]; ok {
+			info := runOf[m]
+			if info.run != "" {
+				info.run += ", "
+			}
+			info.run += filepath.Base(dir)
+			if meta.Reasoning != "" {
+				info.reasoning = meta.Reasoning
+			}
+			// Keep the highest memory seen across runs.
+			if lm, ok := meta.Local[m]; ok && (info.loaded == nil || peakGB(lm) > peakGB(*info.loaded)) {
 				info.loaded = &lm
 			}
 			runOf[m] = info
@@ -221,7 +263,12 @@ func BuildSiteData(cases []*Case, dirs []string, goos, generated string) (*SiteD
 				m.Reasoning = info.reasoning
 			}
 			if info.loaded != nil {
+				// Prefer measured runner RSS; Ollama's own figure can omit
+				// memory-mapped weights.
 				gb := info.loaded.MemoryGB
+				if info.loaded.ResidentGB > 0 {
+					gb = info.loaded.ResidentGB
+				}
 				m.MemoryGB, m.Context = &gb, info.loaded.Context
 			}
 		}
@@ -236,7 +283,13 @@ func BuildSiteData(cases []*Case, dirs []string, goos, generated string) (*SiteD
 		if m == nil || a.Skipped != "" {
 			continue
 		}
-		cell := SiteCell{Command: Normalize(a.Command), Pass: a.Pass, Error: a.Error, FirstFailure: a.Grade.FirstFailure}
+		// With several attempts, show the most recent one and count passes.
+		prev := m.Results[a.CaseID]
+		cell := SiteCell{Command: Normalize(a.Command), Pass: a.Pass, Error: a.Error, FirstFailure: a.Grade.FirstFailure,
+			Attempts: prev.Attempts + 1, Passes: prev.Passes}
+		if a.Pass {
+			cell.Passes++
+		}
 		if a.Judge != nil {
 			cell.Judge, cell.JudgeReason = a.Judge.Verdict, a.Judge.Reason
 		}
@@ -255,6 +308,13 @@ func BuildSiteData(cases []*Case, dirs []string, goos, generated string) (*SiteD
 		})
 	}
 	return data, nil
+}
+
+func peakGB(m LoadedModel) float64 {
+	if m.ResidentGB > 0 {
+		return m.ResidentGB
+	}
+	return m.MemoryGB
 }
 
 type modelRun struct {

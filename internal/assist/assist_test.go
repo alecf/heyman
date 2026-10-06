@@ -628,3 +628,89 @@ func TestReasoningEffortReachesModelCall(t *testing.T) {
 		t.Fatalf("reasoning effort not passed to the model call: %+v", m.calls)
 	}
 }
+
+func TestEmptyReplyRetriesWithoutReasoningEffort(t *testing.T) {
+	m := &namedModel{provider: "ollama"}
+	m.steps = []step{{text: ""}, {text: "stat -f %z notes.txt"}}
+	a := &Assistant{Model: m, Man: &fakeMan{}, ReasoningEffort: "none"}
+	res, err := a.Ask(context.Background(), Request{Question: "size of notes.txt"})
+	if err != nil {
+		t.Fatalf("Ask: %v (calls: %d)", err, len(m.calls))
+	}
+	if res.Command != "stat -f %z notes.txt" {
+		t.Fatalf("command %q", res.Command)
+	}
+	if len(m.calls) != 2 || m.calls[0].ProviderOptions["ollama"] == nil || m.calls[1].ProviderOptions["ollama"] != nil {
+		t.Fatalf("want first call with effort, retry without: %+v", m.calls)
+	}
+	if len(res.Notes) == 0 || !strings.Contains(res.Notes[len(res.Notes)-1], "retried") {
+		t.Errorf("notes: %v", res.Notes)
+	}
+	if a.ReasoningEffort != "none" {
+		t.Errorf("Ask mutated the caller's Assistant: %q", a.ReasoningEffort)
+	}
+}
+
+func TestEmptyReplyWithoutReasoningEffortIsNotRetried(t *testing.T) {
+	m := &namedModel{provider: "ollama"}
+	m.steps = []step{{text: ""}, {text: "ls"}}
+	a := &Assistant{Model: m, Man: &fakeMan{}}
+	if _, err := a.Ask(context.Background(), Request{Question: "q"}); !errors.Is(err, ErrNoCommand) {
+		t.Fatalf("want ErrNoCommand, got %v", err)
+	}
+	if len(m.calls) != 1 {
+		t.Fatalf("calls: %d", len(m.calls))
+	}
+}
+
+func TestReadManRepeatAndSubcommandHint(t *testing.T) {
+	man := &fakeMan{pages: map[string]string{
+		"git":          "GIT(1)\n  git - the stupid content tracker\n",
+		"git-rev-list": "GIT-REV-LIST(1)\n  --count  Print a number stating how many commits\n",
+	}}
+	r := &run{a: (&Assistant{Man: man}).withDefaults(), pages: map[string]string{}}
+
+	out, err := r.readMan(manInput{Page: "git", Search: "rev-list --count"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "no lines match") || !strings.Contains(out, `"git-rev-list"`) {
+		t.Errorf("want subcommand hint, got %q", out)
+	}
+
+	again, _ := r.readMan(manInput{Page: "git", Search: "rev-list --count"})
+	if !strings.Contains(again, "already ran this exact lookup") {
+		t.Errorf("want repeat notice, got %q", again)
+	}
+	// Case/whitespace differences still count as the same lookup.
+	again2, _ := r.readMan(manInput{Page: "git", Search: " REV-LIST --count "})
+	if !strings.Contains(again2, "already ran") {
+		t.Errorf("want repeat notice for equivalent search, got %q", again2)
+	}
+	// A different search is fine.
+	if other, _ := r.readMan(manInput{Page: "git-rev-list", Search: "--count"}); !strings.Contains(other, "Print a number") {
+		t.Errorf("got %q", other)
+	}
+	// Options never trigger the subcommand hint.
+	if opt, _ := r.readMan(manInput{Page: "git", Search: "--nonexistent"}); strings.Contains(opt, "subcommands") {
+		t.Errorf("option search got a subcommand hint: %q", opt)
+	}
+	r.reset()
+	if fresh, _ := r.readMan(manInput{Page: "git", Search: "rev-list --count"}); strings.Contains(fresh, "already ran") {
+		t.Errorf("reset should clear lookup history: %q", fresh)
+	}
+}
+
+func TestAnswerToolOffersExplanationOnlyWhenAsked(t *testing.T) {
+	for _, explain := range []bool{false, true} {
+		r := &run{a: (&Assistant{Man: &fakeMan{}}).withDefaults(), req: Request{Explain: explain}, pages: map[string]string{}}
+		params := r.answerTool().Info().Parameters
+		_, has := params["explanation"]
+		if has != explain {
+			t.Errorf("explain=%v: explanation param present=%v (params %v)", explain, has, params)
+		}
+		if _, ok := params["command"]; !ok {
+			t.Errorf("explain=%v: missing command param", explain)
+		}
+	}
+}

@@ -194,7 +194,21 @@ func (a *Assistant) Ask(ctx context.Context, req Request) (*Result, error) {
 		run.note("this model does not support tool calling; answered without reading man pages")
 		res, err = run.generate(ctx, preload, false)
 	}
+	if errors.Is(err, ErrNoCommand) && a.ReasoningEffort != "" && emptyReply(res) {
+		// Some models (e.g. gemma4:e4b) return nothing at all when asked
+		// not to think. Retry once with the model's default.
+		run.reset()
+		run.note(fmt.Sprintf("empty reply with reasoning effort %q; retried with the model's default", a.ReasoningEffort))
+		a.ReasoningEffort = "" // a is this call's private copy
+		res, err = run.generate(ctx, preload, !a.NoTools)
+	}
 	return res, err
+}
+
+// emptyReply reports whether the model produced no text, reasoning or tool
+// calls at all.
+func emptyReply(res *Result) bool {
+	return res != nil && strings.TrimSpace(res.RawText) == "" && strings.TrimSpace(res.RawReasoning) == "" && len(res.ToolCalls) == 0
 }
 
 // preparePreload fetches the named command's man page. If the command has no
@@ -248,12 +262,13 @@ type run struct {
 	req     Request
 	missing string // command named by the user that has no man page
 
-	mu        sync.Mutex
-	pages     map[string]string // "name(section)" -> cleaned page
-	manPages  []string
-	toolCalls []ToolCall
-	notes     []string
-	answer    *answerInput
+	mu          sync.Mutex
+	seenLookups map[string]int
+	pages       map[string]string // "name(section)" -> cleaned page
+	manPages    []string
+	toolCalls   []ToolCall
+	notes       []string
+	answer      *answerInput
 	// rejected is the last answer refused for lacking an explanation; used
 	// if the model never retries.
 	rejected *answerInput
@@ -265,6 +280,7 @@ func (r *run) reset() {
 	r.toolCalls = nil
 	r.answer = nil
 	r.rejected = nil
+	r.seenLookups = nil
 }
 
 func (r *run) note(msg string) {
@@ -525,10 +541,51 @@ func (r *run) readMan(in manInput) (string, error) {
 	}
 	r.consulted(name, section)
 
+	// Small models sometimes repeat the same lookup until they run out of
+	// steps. Say so instead of returning the same text again.
+	sig := fmt.Sprintf("%s\x00%s\x00%d", key, strings.ToLower(strings.TrimSpace(in.Search)), in.Offset)
+	r.mu.Lock()
+	repeats := r.seenLookups[sig]
+	if r.seenLookups == nil {
+		r.seenLookups = map[string]int{}
+	}
+	r.seenLookups[sig]++
+	r.mu.Unlock()
+	if repeats > 0 {
+		return fmt.Sprintf("You already ran this exact lookup (man %s) and its result is above. Don't repeat it: try a different search or page, or call answer with your best command now.", describeMan(in)), nil
+	}
+
 	if in.Search != "" {
-		return Grep(page, in.Search, 2, r.a.PageChars), nil
+		out := Grep(page, in.Search, 2, r.a.PageChars)
+		if strings.HasPrefix(out, "no lines match") {
+			if sub := r.subcommandPage(name, in.Search); sub != "" {
+				out += fmt.Sprintf(". %s subcommands have their own man pages: try man(page=%q).", name, sub)
+			}
+		}
+		return out, nil
 	}
 	return Chunk(key, page, in.Offset, r.a.PageChars), nil
+}
+
+// subcommandPage returns "<page>-<word>" when the search's first word names a
+// subcommand with its own man page (git rev-list → git-rev-list).
+func (r *run) subcommandPage(page, search string) string {
+	fields := strings.Fields(strings.Trim(search, "\"'"))
+	if len(fields) == 0 {
+		return ""
+	}
+	word := strings.TrimLeft(fields[0], "-")
+	if word == "" || word != fields[0] {
+		return "" // an option, not a subcommand
+	}
+	cand := page + "-" + word
+	if manpage.ValidateName(cand) != nil {
+		return ""
+	}
+	if _, err := r.a.Man.Fetch(cand, ""); err != nil {
+		return ""
+	}
+	return cand
 }
 
 type manSearchInput struct {
@@ -577,28 +634,45 @@ type answerInput struct {
 	Explanation string `json:"explanation,omitempty" description:"Short explanation of what the command does and why these flags"`
 }
 
+// commandOnlyInput is the answer tool's schema when no explanation was
+// requested: offering an explanation field makes models write one anyway,
+// which costs seconds of generation on local models.
+type commandOnlyInput struct {
+	Command string `json:"command" description:"The complete shell command (a pipeline is fine). No markdown, no prompt character."`
+}
+
 func (r *run) answerTool() fantasy.AgentTool {
-	return fantasy.NewAgentTool("answer",
-		"Give the final command. Call this exactly once, when you are done.",
+	const desc = "Give the final command. Call this exactly once, when you are done."
+	if !r.req.Explain {
+		return fantasy.NewAgentTool("answer", desc,
+			func(ctx context.Context, in commandOnlyInput, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
+				return r.acceptAnswer(answerInput{Command: in.Command}), nil
+			})
+	}
+	return fantasy.NewAgentTool("answer", desc,
 		func(ctx context.Context, in answerInput, _ fantasy.ToolCall) (fantasy.ToolResponse, error) {
-			if strings.TrimSpace(in.Command) == "" {
-				return fantasy.NewTextErrorResponse("command must not be empty"), nil
-			}
-			if r.req.Explain && strings.TrimSpace(in.Explanation) == "" {
-				r.mu.Lock()
-				r.rejected = &in
-				r.mu.Unlock()
-				return fantasy.NewTextErrorResponse("the user asked for an explanation: call answer again with an explanation"), nil
-			}
-			r.mu.Lock()
-			r.answer = &in
-			r.mu.Unlock()
-			raw, _ := json.Marshal(in)
-			r.record(ToolCall{Tool: "answer", Input: string(raw)})
-			resp := fantasy.NewTextResponse("ok")
-			resp.StopTurn = true
-			return resp, nil
+			return r.acceptAnswer(in), nil
 		})
+}
+
+func (r *run) acceptAnswer(in answerInput) fantasy.ToolResponse {
+	if strings.TrimSpace(in.Command) == "" {
+		return fantasy.NewTextErrorResponse("command must not be empty")
+	}
+	if r.req.Explain && strings.TrimSpace(in.Explanation) == "" {
+		r.mu.Lock()
+		r.rejected = &in
+		r.mu.Unlock()
+		return fantasy.NewTextErrorResponse("the user asked for an explanation: call answer again with an explanation")
+	}
+	r.mu.Lock()
+	r.answer = &in
+	r.mu.Unlock()
+	raw, _ := json.Marshal(in)
+	r.record(ToolCall{Tool: "answer", Input: string(raw)})
+	resp := fantasy.NewTextResponse("ok")
+	resp.StopTurn = true
+	return resp
 }
 
 // --- prompts ---

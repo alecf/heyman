@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/alecf/heyman/internal/assist"
@@ -186,4 +187,55 @@ func abs(x float64) float64 {
 		return -x
 	}
 	return x
+}
+
+// recordingAnswerer logs which model answered, in order.
+type recordingAnswerer struct {
+	model string
+	log   *[]string
+	mu    *sync.Mutex
+}
+
+func (r *recordingAnswerer) Ask(_ context.Context, req assist.Request) (*assist.Result, error) {
+	r.mu.Lock()
+	*r.log = append(*r.log, "ask "+r.model)
+	r.mu.Unlock()
+	return &assist.Result{Command: "ls"}, nil
+}
+
+func TestLocalModelsRunOneAtATimeAfterPrepare(t *testing.T) {
+	var cases []*Case
+	for _, id := range []string{"a", "b", "c"} {
+		cases = append(cases, &Case{ID: id, Question: id, Tags: []string{"easy"}, Reference: []string{"ls"}, Checks: []Check{{Program: "ls"}}})
+	}
+	var log []string
+	var mu sync.Mutex
+	models := []string{"ollama/m1:7b", "ollama/m2:7b"}
+	attempts, _ := Run(context.Background(), cases, Options{
+		Models: models, Repeat: 2, GOOS: "linux",
+		PrepareLocal: func(_ context.Context, m string) error {
+			mu.Lock()
+			log = append(log, "prepare "+m)
+			mu.Unlock()
+			return nil
+		},
+		NewAnswerer: func(_ context.Context, m string) (assist.Answerer, llm.Spec, error) {
+			spec, _ := llm.ParseSpec(m)
+			return &recordingAnswerer{model: m, log: &log, mu: &mu}, spec, nil
+		},
+	})
+	if len(attempts) != 12 {
+		t.Fatalf("attempts: %d", len(attempts))
+	}
+	want := []string{"prepare ollama/m1:7b"}
+	for i := 0; i < 6; i++ {
+		want = append(want, "ask ollama/m1:7b")
+	}
+	want = append(want, "prepare ollama/m2:7b")
+	for i := 0; i < 6; i++ {
+		want = append(want, "ask ollama/m2:7b")
+	}
+	if strings.Join(log, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("order:\n%s\nwant:\n%s", strings.Join(log, "\n"), strings.Join(want, "\n"))
+	}
 }

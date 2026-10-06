@@ -79,6 +79,8 @@ li { margin: 4px 0; }
 .setup dt { color: var(--muted); }
 .setup dd { margin: 0; color: var(--ink); }
 .lat-track { position: relative; height: 26px; border-left: 1px solid var(--axis); background-image: repeating-linear-gradient(to right, var(--grid) 0 1px, transparent 1px 25%); background-size: calc(100% - 1px) 100%; background-repeat: no-repeat; }
+.lat-limit { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed var(--muted); }
+.legend .k-limit { width: 0; height: 12px; border-left: 1px dashed var(--muted); }
 .lat-range { position: absolute; top: 12px; height: 2px; background: var(--series); opacity: 0.45; border-radius: 1px; }
 .lat-p95 { position: absolute; top: 7px; width: 2px; height: 12px; background: var(--series); opacity: 0.6; border-radius: 1px; }
 .lat-dot { position: absolute; top: 8px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: var(--series); box-shadow: 0 0 0 2px var(--surface); cursor: default; outline: none; }
@@ -104,6 +106,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 td.model { font-family: var(--mono); font-size: 0.82rem; }
 .pass { color: var(--good-text); }
 .fail { color: var(--critical); }
+.mixed { color: var(--ink-2); font-size: 0.8rem; }
 .status { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; }
 p code { white-space: nowrap; }
 .providers { margin-bottom: 16px; }
@@ -192,6 +195,7 @@ footer { margin-top: 64px; font-size: 0.85rem; color: var(--muted); }
   <h2 id="evals">Eval results</h2>
   <p>50 requests a developer might type, from <code>lsof</code> one-liners to multi-tool pipelines like “list the size of all files changed in git in the last week.” Eleven are cases where the correct flags differ between macOS and Linux (<code>sed -i ''</code>, <code>stat -f</code>, <code>date -v-1d</code>), which is what reading local man pages is supposed to fix.</p>
   <p>Each answer has to pass regex checks that accept equivalent spellings. Twenty-two cases are also run in a sandbox against a fixture and compared with the reference output. An LLM judge (Claude Sonnet 5.5) gives a second opinion, reported separately. <a href="https://github.com/alecf/heyman/tree/main/evals">Cases and runner</a>.</p>
+  <p><strong>Short version:</strong> for a tool you use interactively, answers need to be right and come back in well under 30 seconds. On this machine only the API models do both. The best local model, <code>gemma4:12b</code>, is nearly as accurate as Haiku but takes about 40 seconds per answer; the local models fast enough to use (<code>qwen3.5:4b</code>, <code>gemma4:e4b</code>, 10–15 seconds) get about half the answers right.</p>
 
   <div class="card">
     <p class="chart-title">Test setup</p>
@@ -207,7 +211,7 @@ footer { margin-top: 64px; font-size: 0.85rem; color: var(--muted); }
   <div class="card">
     <p class="chart-title">Time per answer</p>
     <p class="chart-sub" id="lat-sub">Seconds from request to command, including every man-page lookup.</p>
-    <div class="legend" aria-hidden="true"><span><i class="k-dot"></i>median</span><span><i class="k-line"></i>up to 95th percentile</span></div>
+    <div class="legend" aria-hidden="true"><span><i class="k-dot"></i>median</span><span><i class="k-line"></i>up to 95th percentile</span><span><i class="k-limit"></i>30 seconds</span></div>
     <div class="bars" id="lat-bars" role="list"></div>
   </div>
 
@@ -273,7 +277,9 @@ footer { margin-top: 64px; font-size: 0.85rem; color: var(--muted); }
     for (const m of models) {
       const rate = m.n ? m.pass / m.n : 0;
       const partial = m.n < data.cases.length;
-      const label = el("div", { class: "bar-label" }, short(m.model), partial ? el("small", { text: m.n + " of " + data.cases.length + " cases" }) : null);
+      const runs = Math.round(m.n / data.cases.length);
+      const note = partial ? m.n + " of " + data.cases.length + " cases" : runs > 1 ? runs + " runs, " + m.n + " attempts" : null;
+      const label = el("div", { class: "bar-label" }, short(m.model), note ? el("small", { text: note }) : null);
       const bar = el("div", { class: "bar", tabindex: "0", role: "listitem", "aria-label": `${m.model}: ${pct(m.pass, m.n)} (${m.pass} of ${m.n})` });
       bar.style.width = (rate * 100) + "%";
       const value = el("span", { class: "bar-value", text: `${pct(m.pass, m.n)}` });
@@ -333,7 +339,9 @@ footer { margin-top: 64px; font-size: 0.85rem; color: var(--muted); }
       ].filter(Boolean);
       for (const t of ["pointermove", "focus"]) dot.addEventListener(t, (e) => showTip(e, tipNodes()));
       for (const t of ["pointerleave", "blur"]) dot.addEventListener(t, hideTip);
-      latBars.append(label, el("div", { class: "lat-track" }, range, p95, dot, value));
+      const limit = el("div", { class: "lat-limit", "aria-hidden": "true" });
+      limit.style.left = x(30) + "%";
+      latBars.append(label, el("div", { class: "lat-track" }, limit, range, p95, dot, value));
     }
     axisRow(latBars, [0, 1, 2, 3, 4].map((t) => t * step + "s"));
 
@@ -363,7 +371,7 @@ footer { margin-top: 64px; font-size: 0.85rem; color: var(--muted); }
       tb.append(el("tr", null, ...cells));
     }
     sum.append(tb);
-    $("summary-note").textContent = "Cost is list-price API spend per query, including every man-page tool round trip. claude-code runs Claude Code in print mode with its own system prompt, so it is slower and costs more. Partial rows: the ministral run was stopped early, and claude-code was run on an 8-case subset. Memory is the peak Ollama reported while the model was loaded.";
+    $("summary-note").textContent = "Cost is list-price API spend per query, including every man-page tool round trip. claude-code runs Claude Code in print mode with its own system prompt, so it is slower and costs more. Partial rows: the ministral run was stopped early, and claude-code was run on an 8-case subset. Memory is the peak resident memory of Ollama's model runner while that model was the only one loaded.";
 
     // Matrix
     const matrix = $("matrix");
@@ -378,7 +386,12 @@ footer { margin-top: 64px; font-size: 0.85rem; color: var(--muted); }
         el("div", null, ...[c.difficulty, ...c.tags.filter((t) => t !== c.difficulty)].map((t) => el("span", { class: "tag", text: t }))));
       const cells = models.map((m) => {
         const res = m.results[c.id];
-        return el("td", { class: "c num" }, res ? status(res.pass) : el("span", { class: "note", text: "–" }));
+        if (!res) return el("td", { class: "c num" }, el("span", { class: "note", text: "–" }));
+        const n = res.attempts || 1, p = res.attempts ? res.passes : (res.pass ? 1 : 0);
+        if (n > 1 && p > 0 && p < n) {
+          return el("td", { class: "c num" }, el("span", { class: "status mixed", text: `${p}/${n}`, "aria-label": `passed ${p} of ${n}` }));
+        }
+        return el("td", { class: "c num" }, status(p === n));
       });
       const tr = el("tr", { tabindex: "0", "aria-expanded": "false" }, q, ...cells);
       const detail = el("tr", { class: "detail", hidden: "" });
@@ -387,8 +400,9 @@ footer { margin-top: 64px; font-size: 0.85rem; color: var(--muted); }
         ...models.filter((m) => m.results[c.id]).map((m) => {
           const res = m.results[c.id];
           const why = res.pass ? "" : (res.first_failure || res.error || "");
+          const tally = res.attempts > 1 ? el("span", { class: "note", text: ` (passed ${res.passes} of ${res.attempts}; latest shown)` }) : null;
           return el("div", null, status(res.pass), " ", el("strong", { text: short(m.model) + "  " }),
-            res.command ? el("code", { text: res.command }) : el("em", { text: "no command" }),
+            res.command ? el("code", { text: res.command }) : el("em", { text: "no command" }), tally,
             why ? el("div", { class: "note", text: "failed: " + why }) : null,
             res.judge ? el("div", { class: "note", text: `judge: ${res.judge}${res.judge_reason ? " — " + res.judge_reason : ""}` }) : null);
         }));
@@ -401,7 +415,7 @@ footer { margin-top: 64px; font-size: 0.85rem; color: var(--muted); }
       tr.addEventListener("click", toggle);
       tr.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
       body.append(tr, detail);
-      rows.push({ c, tr, detail, failedAny: models.some((m) => m.results[c.id] && !m.results[c.id].pass) });
+      rows.push({ c, tr, detail, failedAny: models.some((m) => { const r = m.results[c.id]; return r && (r.attempts ? r.passes < r.attempts : !r.pass); }) });
     }
     matrix.append(body);
 

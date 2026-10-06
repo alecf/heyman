@@ -145,24 +145,29 @@ For open-weight models, you can run them locally with Ollama, use a hosted one t
 
 ### Local models
 
-Recommended (measured on an M2 Max with 32 GB, October 2026; see [evals](#evals)):
+Short version: on a 32 GB M2 Max, no local model we tested is both accurate and fast enough for interactive use. For that, use an API model (`anthropic/claude-haiku-4-5`: 94%, ~3 seconds). Local models work, with a real trade-off:
 
-| model | pass rate (50 cases) | median latency | memory |
-|---|---|---|---|
-| `ollama/qwen3.5:9b` | 76% | 23s | 6.7 GB |
-| `ollama/qwen3.5:4b` | 54% | 13s | 4.3 GB |
+| model | pass (50 cases) | judge agrees | median | p95 | memory |
+|---|---|---|---|---|---|
+| `ollama/gemma4:12b` | 82% | 84% | 41s | 119s | 10.2 GB |
+| `ollama/qwen3.5:9b` | 76% | 64% | 23s | 87s | 7.9 GB |
+| `ollama/ministral-3:8b` | 60% | 52% | 15s | 87s | 10.7 GB |
+| `ollama/qwen3.5:4b` | 50% | 46% | 10s | 55s | 5.9 GB |
+| `ollama/gemma4:e4b` | 46% | 39% | 14s | 41s | 7.3 GB |
 
-Both with thinking off and a 32K context window, set up as below. For comparison, Claude Haiku 4.5 scores 94% in about 3 seconds. Other local models tested on a 16-case screen did worse: `granite4.1:8b` 69% (10 GB, slow), `granite4:7b-a1b-h` 44% (fast), `qwen3:4b-instruct` and `ministral-3:3b` 38%, `lfm2.5:8b` 25%. `granite4.2:8b` was too slow to finish.
+Measured October 2026 with Ollama 0.33.1, thinking off, a 32K context window, models warmed up and the machine kept awake; memory is the runner's peak resident size. Per-case answers are on the [project page](https://alecf.github.io/heyman/#evals). Also tried and dropped after a 16-case screen: `granite4.1:8b`, `granite4.2:8b` (too slow), `granite4:7b-a1b-h`, `qwen3:4b-instruct`, `lfm2.5:8b`, `olmo-3:7b-instruct`, `phi4-mini`, `ministral-3:3b`. Kimi has no local version.
+
+If you want local anyway, `qwen3.5:4b` is the fastest; `gemma4:12b` is the most accurate if you can wait.
 
 ```bash
-ollama pull qwen3.5:9b
+ollama pull qwen3.5:4b
 
 # Cap the context window. Ollama may otherwise pick a large one (64K on a
 # 32 GB Mac), which more than doubles memory use. 32K is plenty for heyman.
-printf 'FROM qwen3.5:9b\nPARAMETER num_ctx 32768\n' > Modelfile
-ollama create qwen3.5-9b-32k -f Modelfile
+printf 'FROM qwen3.5:4b\nPARAMETER num_ctx 32768\n' > Modelfile
+ollama create qwen3.5-4b-32k -f Modelfile
 
-heyman -m ollama/qwen3.5-9b-32k --reasoning-effort none lsof which process is listening on port 8080
+heyman -m ollama/qwen3.5-4b-32k --reasoning-effort none lsof which process is listening on port 8080
 ```
 
 Or save it as a profile (`heyman profile setup` does this for you, and sets `reasoning_effort = "none"` on Ollama profiles):
@@ -170,13 +175,14 @@ Or save it as a profile (`heyman profile setup` does this for you, and sets `rea
 ```toml
 [profiles.local]
 provider = "ollama"
-model = "qwen3.5-9b-32k"
+model = "qwen3.5-4b-32k"
 reasoning_effort = "none"
 ```
 
 Notes:
 
-- `--reasoning-effort` (or `HEYMAN_REASONING_EFFORT`, or `reasoning_effort` in a profile) is sent to `ollama` and `openai-compat` models. `none` turns thinking off; on Qwen 3.5 that halved latency and made the 4B model more accurate and more consistent. Models without thinking ignore it.
+- `--reasoning-effort` (or `HEYMAN_REASONING_EFFORT`, or `reasoning_effort` in a profile) is sent to `ollama` and `openai-compat` models. `none` turns thinking off; on Qwen 3.5 that halved latency and made the 4B model more accurate and more consistent. Models without thinking ignore it, and if a model returns an empty reply with thinking off (gemma4:e4b does), heyman retries once with the model's default.
+- Latency on local models is mostly reading the prompt and writing the answer. Shrinking the preloaded man page cost accuracy for little speed, so it's left at the default; the answer tool only asks for an explanation with `--explain`, which roughly halved what local models generate.
 - The model needs tool-calling support to read man pages. If the server rejects tool definitions, heyman retries once without tools, with just the named command's man page in the prompt. With `--` there's no page to include, so the model answers from memory.
 - Small models sometimes write their answer tool call as text instead of making the call. heyman recognizes the common forms and uses them. If it still can't find a command, `--debug` shows the model's final reply.
 - heyman preloads up to about 48,000 characters (~12K tokens) of the named man page, and the `man` tool returns at most 24,000 characters per call, sending longer pages in chunks. If the context window is smaller than that, Ollama silently drops the start of the prompt, so keep `num_ctx` at 16K or more.
@@ -276,7 +282,7 @@ heyman only has prices for Anthropic models. Their cost is estimated from list p
 
 The [`evals/`](evals/) directory has an eval suite that runs a set of requests against one or more models and checks the commands they return. Run it with `go run ./cmd/heyman-eval --models ...` or `make eval`. See [evals/README.md](evals/README.md) for the case format and options.
 
-Latest results (macOS, 50 cases): Claude Sonnet 5.5 98%, Claude Haiku 4.5 94%, local `qwen3.5:9b` 76%, `qwen3.5:4b` 54%, `ministral-3:3b` 28%. Per-case answers are on the [project page](https://alecf.github.io/heyman/#evals); regenerate its data with `make site-data RESULTS="<results dirs>"`.
+Latest results (macOS, 50 cases): Claude Sonnet 5.5 98%, Claude Haiku 4.5 94%; best local `gemma4:12b` 82% but ~40s per answer (see [Local models](#local-models)). Per-case answers are on the [project page](https://alecf.github.io/heyman/#evals); regenerate its data with `make site-data RESULTS="<results dirs>"`.
 
 ## Development
 
