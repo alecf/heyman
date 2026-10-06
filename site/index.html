@@ -235,7 +235,8 @@ footer { margin-top: 64px; font-size: 0.85rem; color: var(--muted); }
   const hideTip = () => { tip.style.display = "none"; };
 
   function render(data) {
-    const models = data.models;
+    // Best first; ties keep run order.
+    const models = data.models.slice().sort((a, b) => (b.n ? b.pass / b.n : 0) - (a.n ? a.pass / a.n : 0));
     // Chart
     $("chart-sub").textContent = "Share of cases passing all checks · macOS, BSD userland";
     const bars = $("bars");
@@ -283,7 +284,7 @@ footer { margin-top: 64px; font-size: 0.85rem; color: var(--muted); }
       tb.append(el("tr", null, ...cells));
     }
     sum.append(tb);
-    $("summary-note").textContent = "Cost is list-price API spend per query, including every man-page tool round trip. claude-code runs Claude Code in print mode with its own system prompt, so it is slower and costs more. Partial rows: the local model run was stopped early, and claude-code was run on an 8-case subset.";
+    $("summary-note").textContent = "Cost is list-price API spend per query, including every man-page tool round trip. claude-code runs Claude Code in print mode with its own system prompt, so it is slower and costs more. Partial rows: the ministral run was stopped early, and claude-code was run on an 8-case subset. Local models ran on an M2 Max (32 GB) through Ollama with thinking off (--reasoning-effort none) and a 32K context window: qwen3.5:9b used 6.7 GB, qwen3.5:4b 4.3 GB.";
 
     // Matrix
     const matrix = $("matrix");

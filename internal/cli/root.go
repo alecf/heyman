@@ -71,7 +71,7 @@ Choose a model with --model provider/model (default ` + llm.DefaultModel + `):
 	}
 
 	pf := rootCmd.PersistentFlags()
-	pf.StringVarP(&f.model, "model", "m", "", "model as provider/model, e.g. anthropic/claude-haiku-4-5 or ollama/qwen3:4b (env HEYMAN_MODEL)")
+	pf.StringVarP(&f.model, "model", "m", "", "model as provider/model, e.g. anthropic/claude-haiku-4-5 or ollama/qwen3.5:9b (env HEYMAN_MODEL)")
 	pf.StringVarP(&f.profile, "profile", "p", "", "named profile from the config file (env HEYMAN_PROFILE)")
 	pf.BoolVar(&f.noCache, "no-cache", false, "bypass cache for this query")
 	pf.BoolVarP(&f.verbose, "verbose", "v", false, "show model, man pages consulted and tool calls on stderr")
@@ -81,7 +81,7 @@ Choose a model with --model provider/model (default ` + llm.DefaultModel + `):
 	pf.BoolVar(&f.dryRun, "dry-run", false, "print the prompt (as sent to a tool-calling model) without calling a model")
 
 	fl := rootCmd.Flags()
-	fl.StringVarP(&f.section, "section", "s", "", "man page section of <command>, e.g. 3 for `heyman -s 3 printf …`")
+	fl.StringVarP(&f.section, "section", "s", "", "man page section of <command>, e.g. 3 for heyman -s 3 printf …")
 	fl.BoolVarP(&f.explain, "explain", "e", false, "include an explanation")
 	fl.BoolVarP(&f.json, "json", "j", false, "JSON output with metadata")
 	fl.BoolVarP(&f.tokens, "tokens", "t", false, "show token usage and costs")

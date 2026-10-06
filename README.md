@@ -105,6 +105,8 @@ heyman [flags] "<whole request in one quoted argument>"
 |------|-------------|
 | `-m, --model provider/model` | Model to use (see [Models](#models)) |
 | `-p, --profile name` | Use a named profile from the config file |
+| `-s, --section n` | Man page section for the named command (`heyman -s 3 printf …`) |
+| `--reasoning-effort level` | Thinking level for `ollama`/`openai-compat` models: `none` (fastest), `low`, `medium`, `high` |
 | `-e, --explain` | Include an explanation |
 | `-j, --json` | JSON output: `command`, `explanation`, and `metadata` (model, man pages, steps, tokens, cached, cost) |
 | `-c, --copy` | Copy the command to the clipboard (`pbcopy`, `wl-copy` or `xclip`) |
@@ -141,10 +143,46 @@ You can leave out the provider when the model name makes it obvious. Names start
 
 For open-weight models, you can run them locally with Ollama, use a hosted one through OpenRouter, or point `openai-compat` at any OpenAI-compatible server (llama.cpp, vLLM, LM Studio, ...).
 
-Some notes on local models:
+### Local models
 
-- The model needs tool-calling support to read man pages. If the server rejects tool definitions, heyman retries once without tools, with just the named command's man page in the prompt. With `--` there's no page to include, so the model answers from memory. Very small models often give wrong answers either way.
-- Ollama's default context window can be small. heyman preloads up to about 48,000 characters of the named man page, and the `man` tool returns at most 24,000 characters per call, sending longer pages in chunks. If answers look like the model missed part of the page, raise the limit on the server, e.g. `OLLAMA_CONTEXT_LENGTH=32768 ollama serve`.
+Recommended (measured on an M2 Max with 32 GB, October 2026; see [evals](#evals)):
+
+| model | pass rate (50 cases) | median latency | memory |
+|---|---|---|---|
+| `ollama/qwen3.5:9b` | 76% | 23s | 6.7 GB |
+| `ollama/qwen3.5:4b` | 54% | 13s | 4.3 GB |
+
+Both with thinking off and a 32K context window, set up as below. For comparison, Claude Haiku 4.5 scores 94% in about 3 seconds. Other local models tested on a 16-case screen did worse: `granite4.1:8b` 69% (10 GB, slow), `granite4:7b-a1b-h` 44% (fast), `qwen3:4b-instruct` and `ministral-3:3b` 38%, `lfm2.5:8b` 25%. `granite4.2:8b` was too slow to finish.
+
+```bash
+ollama pull qwen3.5:9b
+
+# Cap the context window. Ollama may otherwise pick a large one (64K on a
+# 32 GB Mac), which more than doubles memory use. 32K is plenty for heyman.
+printf 'FROM qwen3.5:9b\nPARAMETER num_ctx 32768\n' > Modelfile
+ollama create qwen3.5-9b-32k -f Modelfile
+
+heyman -m ollama/qwen3.5-9b-32k --reasoning-effort none lsof which process is listening on port 8080
+```
+
+Or save it as a profile (`heyman profile setup` does this for you, and sets `reasoning_effort = "none"` on Ollama profiles):
+
+```toml
+[profiles.local]
+provider = "ollama"
+model = "qwen3.5-9b-32k"
+reasoning_effort = "none"
+```
+
+Notes:
+
+- `--reasoning-effort` (or `HEYMAN_REASONING_EFFORT`, or `reasoning_effort` in a profile) is sent to `ollama` and `openai-compat` models. `none` turns thinking off; on Qwen 3.5 that halved latency and made the 4B model more accurate and more consistent. Models without thinking ignore it.
+- The model needs tool-calling support to read man pages. If the server rejects tool definitions, heyman retries once without tools, with just the named command's man page in the prompt. With `--` there's no page to include, so the model answers from memory.
+- Small models sometimes write their answer tool call as text instead of making the call. heyman recognizes the common forms and uses them. If it still can't find a command, `--debug` shows the model's final reply.
+- heyman preloads up to about 48,000 characters (~12K tokens) of the named man page, and the `man` tool returns at most 24,000 characters per call, sending longer pages in chunks. If the context window is smaller than that, Ollama silently drops the start of the prompt, so keep `num_ctx` at 16K or more.
+- Small models make more mistakes, and sometimes confident, destructive ones. heyman only prints commands; read them before running them.
+
+### Claude Code backend
 
 `claude-code` runs `claude -p` and uses your Claude Code login, so you don't need an API key. Claude Code can run only read-only commands (`man`, `apropos`, `whatis`, `which`, `grep`, `head`, `col`), and it runs in an empty temporary directory. Expect it to take 10 seconds or more per request.
 
@@ -208,8 +246,10 @@ The default location is `~/Library/Caches/heyman` on macOS and `~/.cache/heyman`
 
 | Variable | Purpose |
 |----------|---------|
-| `HEYMAN_MODEL` | Model spec. Overrides profiles. |
+| `HEYMAN_MODEL` | Model spec. Overrides `HEYMAN_PROFILE` and `default_profile`, but not `--profile`. |
 | `HEYMAN_PROFILE` | Profile name. Overrides `default_profile`. |
+| `HEYMAN_REASONING_EFFORT` | Default for `--reasoning-effort` |
+| `HEYMAN_CONFIG` | Config file path |
 | `HEYMAN_CACHE_DIR` | Cache directory |
 | `HEYMAN_OPENAI_COMPAT_BASE_URL`, `HEYMAN_OPENAI_COMPAT_API_KEY` | Endpoint and key for `openai-compat` |
 | `OLLAMA_HOST` | Ollama server address |
@@ -236,7 +276,7 @@ heyman only has prices for Anthropic models. Their cost is estimated from list p
 
 The [`evals/`](evals/) directory has an eval suite that runs a set of requests against one or more models and checks the commands they return. Run it with `go run ./cmd/heyman-eval --models ...` or `make eval`. See [evals/README.md](evals/README.md) for the case format and options.
 
-Latest results (macOS, 50 cases): Claude Haiku 4.5 94%, Claude Sonnet 5.5 98%, local `ministral-3:3b` 28%. Per-case answers are on the [project page](https://alecf.github.io/heyman/#evals); regenerate its data with `make site-data RESULTS="<results dirs>"`.
+Latest results (macOS, 50 cases): Claude Sonnet 5.5 98%, Claude Haiku 4.5 94%, local `qwen3.5:9b` 76%, `qwen3.5:4b` 54%, `ministral-3:3b` 28%. Per-case answers are on the [project page](https://alecf.github.io/heyman/#evals); regenerate its data with `make site-data RESULTS="<results dirs>"`.
 
 ## Development
 

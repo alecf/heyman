@@ -277,7 +277,13 @@ You can also set up profiles manually by editing:
 			}
 
 			profileName := generateProfileName(cfg, sp.name, model)
-			cfg.AddProfile(profileName, config.Profile{Provider: sp.name, Model: model, BaseURL: baseURL})
+			profile := config.Profile{Provider: sp.name, Model: model, BaseURL: baseURL}
+			if sp.name == llm.Ollama {
+				// Measured on qwen3.5: same accuracy, roughly half the latency.
+				// Models without thinking ignore it.
+				profile.ReasoningEffort = "none"
+			}
+			cfg.AddProfile(profileName, profile)
 			if len(cfg.Profiles) == 1 || cfg.DefaultProfile == "" || !cfg.ProfileExists(cfg.DefaultProfile) {
 				cfg.DefaultProfile = profileName
 			}
@@ -314,7 +320,7 @@ var setupProviders = []setupProvider{
 	{llm.OpenAI, "OpenAI API", "", ""},
 	{llm.OpenRouter, "OpenRouter (many hosted open-weight models)", "", ""},
 	{llm.Google, "Gemini API", "", ""},
-	{llm.Ollama, "local models via Ollama", "qwen3:4b", "Make sure Ollama is running (ollama serve) and the model is pulled (ollama pull <model>)."},
+	{llm.Ollama, "local models via Ollama", "qwen3.5:9b", "Make sure Ollama is running (ollama serve) and the model is pulled (ollama pull <model>).\nThinking is turned off (reasoning_effort = \"none\"): it's much faster and just as accurate for heyman.\nOllama may give the model a very large context window; see the README for capping it to save memory."},
 	{llm.OpenAICompat, "any OpenAI-compatible server (llama.cpp, vLLM, LM Studio…)", "", ""},
 }
 
@@ -453,6 +459,9 @@ func profileShowCmd() *cobra.Command {
 			fmt.Printf("  Model:          %s\n", profile.Model)
 			if profile.BaseURL != "" {
 				fmt.Printf("  Base URL:       %s\n", profile.BaseURL)
+			}
+			if profile.ReasoningEffort != "" {
+				fmt.Printf("  Reasoning:      %s\n", profile.ReasoningEffort)
 			}
 			fmt.Printf("  Use with:       heyman --profile %s …  (or --model %s)\n", profileName, profile.Spec())
 
