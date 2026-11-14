@@ -20,6 +20,7 @@ cache.Get(key) ──hit──────────────────�
  │ miss                                                           │
  ▼                                                                │
 assist.New ──► claude-code/… → assist.ClaudeCode (shells out to `claude -p`)
+ │         ├─► apple/…       → assist.AppleFM (shells out to `fm respond`)
  │         └─► anything else → assist.Assistant (fantasy agent)   │
  ▼                                                                │
 Answerer.Ask                                                      │
@@ -71,6 +72,18 @@ claude -p --output-format json --system-prompt <prompt> --tools Bash \
 
 The request goes in on stdin. The process runs in a fresh empty temp directory, so no project `CLAUDE.md` or settings get loaded, and the system prompt tells the model not to run the user's command or look at their files. Bash is the only tool, and only the allowlisted read-only commands are permitted. Denied commands appear in `ToolCalls` with `Error: "denied"`. The model answers in plain text, which is parsed with `ParseText`. Cost and usage come from Claude Code's JSON output (`total_cost_usd`). Expect 10 seconds or more per request.
 
+## apple backend
+
+`apple/system` doesn't go through fantasy either. `assist.AppleFM` runs the `fm` CLI that ships with macOS 27:
+
+```
+fm respond --no-stream --greedy --schema <answer schema> --instructions <prompt> --model system
+```
+
+The request goes in on stdin. The schema is a generation schema (the format `fm schema object` prints, including `x-order`) with a `command` field, plus `explanation` with `--explain`, so the reply is always JSON. `fm respond` can't register custom tools and the on-device model has a 4,096-token context window, so this backend is single-shot: the named command's man page is cut to 9,000 characters and preloaded, and if `fm` still reports that the context is full, `Ask` retries with half as much (down to 2,000). With `--` there is no page, so the model answers from memory. The schema caps field lengths and each call times out after 45 seconds, because the model sometimes repeats itself until the context fills. `fm` reports no token usage, so it's recorded as 0. Exit status 69 means the machine hasn't accepted the Foundation Models CLI terms (`sudo fm license`).
+
+`fm serve` also offers an OpenAI-compatible endpoint, but it ignores `tools` (the model writes the tool call as text) and adds a server process to manage, so heyman doesn't use it.
+
 ## Caching
 
 `cache.GenerateKey` hashes (SHA-256) a key version (`v2`), the model spec, the mode (`command` or `explain`), the command, the section, the question and `runtime.GOOS`. Entries are JSON files in `HEYMAN_CACHE_DIR` (otherwise the XDG cache dir), expire after `cache_days`, and are deleted if they can't be decoded. Bump `keyVersion` in `internal/cache/key.go` whenever the prompt or the `Result` format changes.
@@ -82,4 +95,4 @@ The request goes in on stdin. The process runs in a fresh empty temp directory, 
 3. `internal/pricing/database.go`: add prices if you want `--tokens` to show cost. `IsFree` marks local providers.
 4. README: add it to the provider table.
 
-A provider that isn't an API (like `claude-code`) instead implements `assist.Answerer` and is selected in `assist.New`.
+A provider that isn't an API (like `claude-code` or `apple`) instead implements `assist.Answerer` and is selected in `assist.New`.

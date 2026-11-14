@@ -138,6 +138,7 @@ Pick a model with `--model provider/model`. heyman checks these in order and use
 | `ollama` | none; `OLLAMA_HOST` is optional (default `localhost:11434`) | `ollama/qwen3:4b` |
 | `openai-compat` | `HEYMAN_OPENAI_COMPAT_BASE_URL` (or `base_url` in a profile), plus `HEYMAN_OPENAI_COMPAT_API_KEY` if the server needs a key | `openai-compat/<model>` |
 | `claude-code` | the `claude` CLI, installed and logged in | `claude-code/haiku` |
+| `apple` | macOS 27 or later with Apple Intelligence on (uses the built-in `fm` CLI) | `apple/system` |
 
 You can leave out the provider when the model name makes it obvious. Names starting with `claude-` go to Anthropic, `gpt-`, `chatgpt-` and `o1`-style names go to OpenAI, and `gemini-` goes to Google. A `name:tag` name like `qwen3:4b` goes to Ollama. Anything else needs the `provider/` prefix.
 
@@ -187,6 +188,18 @@ Notes:
 - Small models sometimes write their answer tool call as text instead of making the call. heyman recognizes the common forms and uses them. If it still can't find a command, `--debug` shows the model's final reply.
 - heyman preloads up to about 48,000 characters (~12K tokens) of the named man page, and the `man` tool returns at most 24,000 characters per call, sending longer pages in chunks. If the context window is smaller than that, Ollama silently drops the start of the prompt, so keep `num_ctx` at 16K or more.
 - Small models make more mistakes, and sometimes confident, destructive ones. heyman only prints commands; read them before running them.
+
+### Apple Foundation Models
+
+On macOS 27 and later, `apple/system` uses Apple's on-device model through the `fm` command that ships with macOS. It's free, needs no API key, works offline, and usually answers in 2 to 4 seconds:
+
+```bash
+fm available                  # check that the system model is ready
+sudo fm license               # accept the Foundation Models CLI terms once, if fm asks
+heyman -m apple/system tar extract foo.tgz into /tmp
+```
+
+It isn't the default because it gets most requests wrong. It passed 24% of the 50 eval cases, versus 94% for `anthropic/claude-haiku-4-5` (macOS 27.0.1, November 2026). The model has a 4K-token context window, so heyman preloads only the first ~9,000 characters of the named man page, and `fm` can't call heyman's tools, so the model can't look up other pages. With `--` it answers from memory and passed 1 of 20 such cases. A few answers ran on until they hit heyman's 45-second limit.
 
 ### Claude Code backend
 

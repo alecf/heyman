@@ -13,8 +13,11 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"os/exec"
+	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
@@ -27,6 +30,26 @@ import (
 // DefaultModel is used when no model or profile is configured.
 const DefaultModel = "anthropic/claude-haiku-4-5"
 
+// AppleAvailable reports whether Apple's on-device model can be used: this is
+// macOS, the `fm` CLI is installed (macOS 27+), and `fm available` says the
+// system model is ready. That fails when Apple Intelligence is off, the model
+// is still downloading, the hardware isn't supported, or the Foundation
+// Models CLI terms haven't been accepted (`sudo fm license`).
+func AppleAvailable() bool {
+	if runtime.GOOS != "darwin" {
+		return false
+	}
+	bin, err := exec.LookPath("fm")
+	if err != nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	// No stdin: if the terms haven't been accepted, fm reads EOF as "no"
+	// and exits non-zero instead of waiting for an answer.
+	return exec.CommandContext(ctx, bin, "available", "--model", "system").Run() == nil
+}
+
 // Provider names.
 const (
 	Anthropic    = "anthropic"
@@ -38,6 +61,9 @@ const (
 	// ClaudeCode shells out to the `claude` CLI instead of calling an API.
 	// It is not a fantasy provider; callers handle it separately.
 	ClaudeCode = "claude-code"
+	// Apple runs Apple's on-device Foundation Model through the `fm` CLI.
+	// Like ClaudeCode, callers handle it separately.
+	Apple = "apple"
 )
 
 // providers maps each provider to the env vars that may hold its API key, in
@@ -50,6 +76,7 @@ var providers = map[string][]string{
 	Ollama:       nil,
 	OpenAICompat: {"HEYMAN_OPENAI_COMPAT_API_KEY"},
 	ClaudeCode:   nil,
+	Apple:        nil,
 }
 
 // Providers returns the supported provider names, sorted.
@@ -201,8 +228,8 @@ func NewLanguageModel(ctx context.Context, spec Spec, opts Options) (fantasy.Lan
 			key = "unused"
 		}
 		p, err = openaicompat.New(openaicompat.WithBaseURL(base), openaicompat.WithAPIKey(key))
-	case ClaudeCode:
-		return nil, fmt.Errorf("claude-code is not an API provider")
+	case ClaudeCode, Apple:
+		return nil, fmt.Errorf("%s is not an API provider", spec.Provider)
 	default:
 		return nil, fmt.Errorf("unknown provider %q (providers: %s)", spec.Provider, strings.Join(Providers(), ", "))
 	}

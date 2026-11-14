@@ -27,9 +27,9 @@ make eval-quick                         # easy cases, no exec
 | flag | meaning |
 |---|---|
 | `--cases FILE` | case file (default `evals/cases.yaml`) |
-| `--models a,b` | `provider/model` specs (default `anthropic/claude-haiku-4-5`); any provider heyman supports, including `ollama/…` and `claude-code/…` |
+| `--models a,b` | `provider/model` specs (default `anthropic/claude-haiku-4-5`); any provider heyman supports, including `ollama/…`, `apple/…` and `claude-code/…` |
 | `--filter RE` | keep cases whose id **or any tag** matches (e.g. `bsd-gnu`, `^hard$`, `^git-`) |
-| `--parallel N` | concurrent API attempts (default 4). Ollama models always run one at a time in their own lane. |
+| `--parallel N` | concurrent API attempts (default 4). Local models (`ollama`, `apple`) always run one at a time in their own lane. |
 | `--repeat K` | run every case K times to measure variance (matrix cells become `k/K`) |
 | `--timeout D` | per-attempt model timeout (default 3m) |
 | `--exec` | run execution checks in a sandbox (see below) |

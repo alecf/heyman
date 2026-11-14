@@ -27,11 +27,13 @@ func TestParseSpec(t *testing.T) {
 		{"openrouter/a/b", OpenRouter, "a/b", false},
 		{"openrouter/moonshotai/kimi-k2:free", OpenRouter, "moonshotai/kimi-k2:free", false},
 		{"claude-code/haiku", ClaudeCode, "haiku", false},
+		{"apple/system", Apple, "system", false},
 		{"openai-compat/local", OpenAICompat, "local", false},
 		{"", "", "", true},
 		{"anthropic/", "", "", true},
 		{"ollama", "", "", true},
 		{"claude-code", "", "", true},
+		{"apple", "", "", true},
 		{"gemma3n", "", "", true},
 		{"hf.co/x/y:Q4", "", "", true},
 		{"unknown/model", "", "", true},
@@ -97,6 +99,9 @@ func TestNewLanguageModelKeys(t *testing.T) {
 	}
 	if _, err := NewLanguageModel(ctx, Spec{ClaudeCode, "haiku"}, Options{}); err == nil {
 		t.Error("claude-code is not an API provider")
+	}
+	if _, err := NewLanguageModel(ctx, Spec{Apple, "system"}, Options{}); err == nil {
+		t.Error("apple is not an API provider")
 	}
 	if _, err := NewLanguageModel(ctx, Spec{"nope", "m"}, Options{}); err == nil {
 		t.Error("unknown provider: want error")
