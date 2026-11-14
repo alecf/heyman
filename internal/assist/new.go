@@ -24,7 +24,8 @@ type Config struct {
 }
 
 // New returns an Answerer for cfg.Model: a fantasy-backed Assistant for API
-// providers, or the claude CLI wrapper for "claude-code/…".
+// providers, the claude CLI wrapper for "claude-code/…", or the fm CLI
+// wrapper for "apple/…".
 func New(ctx context.Context, cfg Config) (Answerer, llm.Spec, error) {
 	if cfg.Man == nil {
 		cfg.Man = manpage.NewFetcher()
@@ -39,6 +40,9 @@ func New(ctx context.Context, cfg Config) (Answerer, llm.Spec, error) {
 	}
 	if spec.Provider == llm.ClaudeCode {
 		return &ClaudeCode{Model: spec.Model, Man: cfg.Man, OnEvent: cfg.OnEvent}, spec, nil
+	}
+	if spec.Provider == llm.Apple {
+		return &AppleFM{Model: spec.Model, PreloadChars: cfg.PreloadChars, Man: cfg.Man, OnEvent: cfg.OnEvent}, spec, nil
 	}
 	lm, err := llm.NewLanguageModel(ctx, spec, llm.Options{BaseURL: cfg.BaseURL})
 	if err != nil {

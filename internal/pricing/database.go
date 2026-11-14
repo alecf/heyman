@@ -66,7 +66,7 @@ func (db *Database) GetPricing(spec string) *ModelPricing {
 
 // IsFree reports whether the provider runs models locally at no API cost.
 func IsFree(provider string) bool {
-	return provider == "ollama"
+	return provider == "ollama" || provider == "apple"
 }
 
 // CalculateCost calculates the cost for a given number of input and output tokens

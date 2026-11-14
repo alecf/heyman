@@ -234,6 +234,9 @@ func run() int {
 		Judge:    j,
 		MaxCost:  *maxCost,
 		PrepareLocal: func(ctx context.Context, model string) error {
+			if spec, err := llm.ParseSpec(model); err != nil || spec.Provider != llm.Ollama {
+				return nil
+			}
 			w, err := eval.PrepareOllama(ctx, strings.TrimSuffix(llm.OllamaBaseURL(), "/v1"), model)
 			if len(w.Unloaded) > 0 {
 				fmt.Fprintf(os.Stderr, "unloaded %s before %s\n", strings.Join(w.Unloaded, ", "), model)

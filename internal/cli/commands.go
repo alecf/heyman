@@ -316,6 +316,7 @@ type setupProvider struct {
 
 var setupProviders = []setupProvider{
 	{llm.Anthropic, "Claude API (recommended)", "claude-haiku-4-5", ""},
+	{llm.Apple, "Apple's on-device model via the fm CLI (macOS 27+, free, offline)", "system", "Requires Apple Intelligence to be enabled. If fm asks, accept its terms once with: sudo fm license"},
 	{llm.ClaudeCode, "use your Claude Code login via the claude CLI (slower)", "haiku", "Requires the `claude` CLI to be installed and logged in."},
 	{llm.OpenAI, "OpenAI API", "", ""},
 	{llm.OpenRouter, "OpenRouter (many hosted open-weight models)", "", ""},
@@ -592,6 +593,12 @@ func checkProfile(ctx context.Context, p config.Profile) error {
 	if spec.Provider == llm.ClaudeCode {
 		if _, err := exec.LookPath("claude"); err != nil {
 			return fmt.Errorf("the claude CLI is not on PATH")
+		}
+		return nil
+	}
+	if spec.Provider == llm.Apple {
+		if !llm.AppleAvailable() {
+			return fmt.Errorf("Apple Foundation Models isn't available: needs macOS 27+ with Apple Intelligence on (check with: fm available; accept the terms with: sudo fm license)")
 		}
 		return nil
 	}

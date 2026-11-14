@@ -70,7 +70,7 @@ type AnswererFactory func(ctx context.Context, model string) (assist.Answerer, l
 type Options struct {
 	Models   []string
 	Repeat   int
-	Parallel int           // concurrent API attempts; local (ollama) models always run 1 at a time
+	Parallel int           // concurrent API attempts; local (ollama, apple) models always run 1 at a time
 	Timeout  time.Duration // per attempt (model call only)
 	Executor *Executor     // nil disables exec checks
 	Judge    *Judge        // nil disables the judge
@@ -132,12 +132,13 @@ func Run(ctx context.Context, cases []*Case, opts Options) ([]Attempt, RunStats)
 	r := &runner{opts: opts, perModel: map[string]*modelCost{}}
 	// Local models share one machine: run them one model at a time (all of
 	// a model's attempts before the next model) so Ollama never swaps models
-	// between cases. Remote attempts interleave freely.
+	// between cases and latencies aren't inflated by contention. Remote
+	// attempts interleave freely.
 	var local [][]job
 	var remote []job
 	for _, m := range opts.Models {
 		isLocal := false
-		if spec, err := llm.ParseSpec(m); err == nil && spec.Provider == llm.Ollama {
+		if spec, err := llm.ParseSpec(m); err == nil && (spec.Provider == llm.Ollama || spec.Provider == llm.Apple) {
 			isLocal = true
 		}
 		var mine []job
@@ -368,7 +369,7 @@ func (r *runner) attempt(ctx context.Context, j job) Attempt {
 			}
 		}
 		a.CostUSD = EstimateCost(spec, res.CostUSD, res.Usage.InputTokens, res.Usage.OutputTokens, res.Usage.CacheReadTokens, res.Usage.CacheWriteTokens)
-	} else if spec.Provider == llm.Ollama {
+	} else if spec.Provider == llm.Ollama || spec.Provider == llm.Apple {
 		zero := 0.0
 		a.CostUSD = &zero
 	}
